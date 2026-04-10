@@ -1,19 +1,29 @@
 #include <rtthread.h>
 
+#include "board.h"
+#include "hpm_gpio_drv.h"
+#include "hpm_gpiom_drv.h"
+#include "hpm_gpiom_soc_drv.h"
 #include "app_config.h"
 #include "svc_adc.h"
+#include "svc_lcd.h"
 #include "svc_power.h"
 #include "svc_vehicle_io.h"
 
 /*
- * 当前先围绕整机电源主轴做第一版状态建模：
- * 1. BAT24 是否存在
- * 2. SUPER_C_5V 是否还有缓冲能力
- * 3. ACC / ON 当前是否有效
- * 锂电先作为附带监控项保留在输出里。
+ * 第一版掉电保持状态机：
+ * 1. 以 BAT24 / SUPER_C_5V / ACC / ON 为主输入
+ * 2. 主电在线时只更新 supercap_ready，不用超容电压限制正常运行
+ * 3. 主电掉电沿到来时，再根据 supercap_ready 决定进入保持还是直接进入关机准备
+ * 4. 掉电流程中如果主电恢复，主动触发一次软件复位，避免卡在半掉电状态
+ * 5. 最终断电动作分两步执行：先切 SoC/24V 相关输出，再释放 MCU 保持
  */
-#define SVC_POWER_MAIN_PRESENT_THRESHOLD_MV      18000UL
-#define SVC_POWER_SUPERCAP_HOLD_THRESHOLD_MV     4200UL
+#define SVC_POWER_CTRL_GPIO              HPM_GPIO0
+#define SVC_POWER_CTRL_GPIO_INDEX        GPIO_DO_GPIOC
+#define SVC_POWER_CTRL_PWREN_24V_PIN     11
+#define SVC_POWER_CTRL_PWREN_SOC_PIN     12
+#define SVC_POWER_CTRL_SUPERCAP_CHRG_PIN 13
+#define SVC_POWER_CTRL_PWR_HOLD_PIN      14
 
 typedef enum
 {
@@ -22,8 +32,26 @@ typedef enum
     SVC_POWER_STAGE_STANDBY,
     SVC_POWER_STAGE_ACC_ACTIVE,
     SVC_POWER_STAGE_ON_ACTIVE,
-    SVC_POWER_STAGE_SUPERCAP_HOLD
+    SVC_POWER_STAGE_SUPERCAP_HOLD,
+    SVC_POWER_STAGE_SHUTDOWN_PENDING,
+    SVC_POWER_STAGE_SHUTDOWN_IN_PROGRESS
 } svc_power_stage_t;
+
+static svc_power_stage_t g_power_stage = SVC_POWER_STAGE_UNKNOWN;
+static rt_tick_t g_supercap_hold_enter_tick = 0;
+static rt_tick_t g_shutdown_pending_enter_tick = 0;
+static rt_bool_t g_power_loss_latched = RT_FALSE;
+static rt_bool_t g_shutdown_prepare_done = RT_FALSE;
+static rt_bool_t g_supercap_ready = RT_FALSE;
+static rt_bool_t g_prev_main_present = RT_FALSE;
+static rt_uint8_t g_main_present_confirm_count = 0;
+static rt_uint8_t g_main_loss_confirm_count = 0;
+static rt_uint8_t g_supercap_ready_confirm_count = 0;
+static rt_uint8_t g_supercap_low_confirm_count = 0;
+static rt_bool_t g_final_soc_cut_done = RT_FALSE;
+static rt_bool_t g_final_hold_cut_done = RT_FALSE;
+
+void rt_hw_cpu_reset(void);
 
 static const char *svc_power_stage_to_str(svc_power_stage_t stage)
 {
@@ -44,42 +72,325 @@ static const char *svc_power_stage_to_str(svc_power_stage_t stage)
     case SVC_POWER_STAGE_SUPERCAP_HOLD:
         return "SUPERCAP_HOLD";
 
+    case SVC_POWER_STAGE_SHUTDOWN_PENDING:
+        return "SHUTDOWN_PENDING";
+
+    case SVC_POWER_STAGE_SHUTDOWN_IN_PROGRESS:
+        return "SHUTDOWN_IN_PROGRESS";
+
     case SVC_POWER_STAGE_UNKNOWN:
     default:
         return "UNKNOWN";
     }
 }
 
+static rt_uint8_t svc_power_ms_to_confirm_count(rt_uint32_t time_ms)
+{
+    rt_uint32_t count;
+
+    count = (time_ms + APP_POWER_TASK_PERIOD_MS - 1U) / APP_POWER_TASK_PERIOD_MS;
+    if (count == 0U)
+    {
+        count = 1U;
+    }
+    if (count > 255U)
+    {
+        count = 255U;
+    }
+
+    return (rt_uint8_t)count;
+}
+
+static void svc_power_update_confirm_counter(rt_bool_t condition, rt_uint8_t *counter)
+{
+    if (condition)
+    {
+        if (*counter < 255U)
+        {
+            (*counter)++;
+        }
+    }
+    else
+    {
+        *counter = 0U;
+    }
+}
+
+static void svc_power_init_ctrl_pins(void)
+{
+    HPM_IOC->PAD[IOC_PAD_PC11].FUNC_CTL = IOC_PC11_FUNC_CTL_GPIO_C_11;
+    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 11, gpiom_soc_gpio0);
+    gpio_set_pin_output(SVC_POWER_CTRL_GPIO, GPIO_OE_GPIOC, SVC_POWER_CTRL_PWREN_24V_PIN);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWREN_24V_PIN, 1);
+
+    HPM_IOC->PAD[IOC_PAD_PC12].FUNC_CTL = IOC_PC12_FUNC_CTL_GPIO_C_12;
+    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 12, gpiom_soc_gpio0);
+    gpio_set_pin_output(SVC_POWER_CTRL_GPIO, GPIO_OE_GPIOC, SVC_POWER_CTRL_PWREN_SOC_PIN);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWREN_SOC_PIN, 1);
+
+    HPM_IOC->PAD[IOC_PAD_PC13].FUNC_CTL = IOC_PC13_FUNC_CTL_GPIO_C_13;
+    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 13, gpiom_soc_gpio0);
+    gpio_set_pin_output(SVC_POWER_CTRL_GPIO, GPIO_OE_GPIOC, SVC_POWER_CTRL_SUPERCAP_CHRG_PIN);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_SUPERCAP_CHRG_PIN, 1);
+
+    HPM_IOC->PAD[IOC_PAD_PC14].FUNC_CTL = IOC_PC14_FUNC_CTL_GPIO_C_14;
+    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 14, gpiom_soc_gpio0);
+    gpio_set_pin_output(SVC_POWER_CTRL_GPIO, GPIO_OE_GPIOC, SVC_POWER_CTRL_PWR_HOLD_PIN);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWR_HOLD_PIN, 1);
+}
+
+static void svc_power_cut_soc_outputs(void)
+{
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWREN_SOC_PIN, 0);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWREN_24V_PIN, 0);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_SUPERCAP_CHRG_PIN, 0);
+}
+
+static void svc_power_release_mcu_hold(void)
+{
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWR_HOLD_PIN, 0);
+}
+
+static rt_bool_t svc_power_is_main_present_raw(const app_adc_snapshot_t *adc_snapshot)
+{
+    return (adc_snapshot->est_bat24_mv >= APP_PWR_MAIN_PRESENT_THRESHOLD_MV);
+}
+
+static rt_bool_t svc_power_is_supercap_ready_raw(const app_adc_snapshot_t *adc_snapshot)
+{
+    return (adc_snapshot->est_super_c_mv >= APP_PWR_SUPERCAP_READY_THRESHOLD_MV);
+}
+
+static rt_bool_t svc_power_is_supercap_available_raw(const app_adc_snapshot_t *adc_snapshot)
+{
+    return (adc_snapshot->est_super_c_mv >= APP_PWR_SUPERCAP_HOLD_THRESHOLD_MV);
+}
+
+static rt_bool_t svc_power_is_supercap_low_raw(const app_adc_snapshot_t *adc_snapshot)
+{
+    return (adc_snapshot->est_super_c_mv < APP_PWR_SUPERCAP_SHUTDOWN_THRESHOLD_MV);
+}
+
+static rt_bool_t svc_power_is_shutdown_flow_stage(svc_power_stage_t stage)
+{
+    return ((stage == SVC_POWER_STAGE_SUPERCAP_HOLD)
+         || (stage == SVC_POWER_STAGE_SHUTDOWN_PENDING)
+         || (stage == SVC_POWER_STAGE_SHUTDOWN_IN_PROGRESS));
+}
+
+static rt_uint32_t svc_power_ticks_to_ms(rt_tick_t start_tick)
+{
+    rt_tick_t now_tick;
+    rt_tick_t delta_tick;
+
+    if (start_tick == 0)
+    {
+        return 0;
+    }
+
+    now_tick = rt_tick_get();
+    delta_tick = now_tick - start_tick;
+
+    return (rt_uint32_t)((rt_uint64_t)delta_tick * 1000UL / RT_TICK_PER_SECOND);
+}
+
+static rt_uint32_t svc_power_get_hold_elapsed_ms(void)
+{
+    return svc_power_ticks_to_ms(g_supercap_hold_enter_tick);
+}
+
+static rt_uint32_t svc_power_get_shutdown_pending_elapsed_ms(void)
+{
+    return svc_power_ticks_to_ms(g_shutdown_pending_enter_tick);
+}
+
+static svc_power_stage_t svc_power_eval_normal_stage(const app_vehicle_io_state_t *vehicle_state)
+{
+    if (vehicle_state->wk_on != 0U)
+    {
+        return SVC_POWER_STAGE_ON_ACTIVE;
+    }
+
+    if (vehicle_state->wk_acc != 0U)
+    {
+        return SVC_POWER_STAGE_ACC_ACTIVE;
+    }
+
+    return SVC_POWER_STAGE_STANDBY;
+}
+
 static svc_power_stage_t svc_power_eval_stage(const app_adc_snapshot_t *adc_snapshot,
                                               const app_vehicle_io_state_t *vehicle_state)
 {
+    rt_bool_t main_present_raw;
     rt_bool_t main_present;
-    rt_bool_t supercap_has_hold;
+    rt_bool_t main_falling_edge;
+    rt_bool_t main_rising_edge;
+    rt_bool_t supercap_available;
+    rt_uint8_t main_present_confirm_target;
+    rt_uint8_t main_loss_confirm_target;
+    rt_uint8_t supercap_ready_confirm_target;
+    rt_uint8_t supercap_low_confirm_target;
 
-    main_present = (adc_snapshot->est_bat24_mv >= SVC_POWER_MAIN_PRESENT_THRESHOLD_MV);
-    supercap_has_hold = (adc_snapshot->est_super_c_mv >= SVC_POWER_SUPERCAP_HOLD_THRESHOLD_MV);
+    main_present_confirm_target = svc_power_ms_to_confirm_count(APP_PWR_MAIN_PRESENT_CONFIRM_MS);
+    main_loss_confirm_target = svc_power_ms_to_confirm_count(APP_PWR_MAIN_LOSS_CONFIRM_MS);
+    supercap_ready_confirm_target = svc_power_ms_to_confirm_count(APP_PWR_SUPERCAP_READY_CONFIRM_MS);
+    supercap_low_confirm_target = svc_power_ms_to_confirm_count(APP_PWR_SUPERCAP_LOW_CONFIRM_MS);
+
+    main_present_raw = svc_power_is_main_present_raw(adc_snapshot);
+    svc_power_update_confirm_counter(main_present_raw, &g_main_present_confirm_count);
+    svc_power_update_confirm_counter(!main_present_raw, &g_main_loss_confirm_count);
+    svc_power_update_confirm_counter(svc_power_is_supercap_ready_raw(adc_snapshot), &g_supercap_ready_confirm_count);
+    svc_power_update_confirm_counter(svc_power_is_supercap_low_raw(adc_snapshot), &g_supercap_low_confirm_count);
+
+    main_present = (g_main_present_confirm_count >= main_present_confirm_target);
+    main_falling_edge = (g_prev_main_present == RT_TRUE) && (g_main_loss_confirm_count >= main_loss_confirm_target);
+    main_rising_edge = (g_prev_main_present == RT_FALSE) && (main_present == RT_TRUE);
+    supercap_available = svc_power_is_supercap_available_raw(adc_snapshot);
 
     if (main_present)
     {
-        if (vehicle_state->wk_on != 0U)
+        if (main_rising_edge && svc_power_is_shutdown_flow_stage(g_power_stage))
         {
-            return SVC_POWER_STAGE_ON_ACTIVE;
+            rt_kprintf("PWR event: main power restored during %s, reset now\r\n",
+                       svc_power_stage_to_str(g_power_stage));
+            rt_thread_mdelay(APP_PWR_RECOVERY_RESET_DELAY_MS);
+            rt_hw_cpu_reset();
         }
 
-        if (vehicle_state->wk_acc != 0U)
+        g_power_loss_latched = RT_FALSE;
+        if (g_supercap_ready_confirm_count >= supercap_ready_confirm_target)
         {
-            return SVC_POWER_STAGE_ACC_ACTIVE;
+            g_supercap_ready = RT_TRUE;
         }
-
-        return SVC_POWER_STAGE_STANDBY;
+        g_prev_main_present = RT_TRUE;
+        return svc_power_eval_normal_stage(vehicle_state);
     }
 
-    if (supercap_has_hold)
+    if (g_main_loss_confirm_count >= main_loss_confirm_target)
     {
+        g_prev_main_present = RT_FALSE;
+    }
+
+    if ((main_falling_edge == RT_TRUE) && (g_power_loss_latched == RT_FALSE))
+    {
+        g_power_loss_latched = RT_TRUE;
+
+        if (g_supercap_ready && supercap_available)
+        {
+            return SVC_POWER_STAGE_SUPERCAP_HOLD;
+        }
+
+        return SVC_POWER_STAGE_SHUTDOWN_PENDING;
+    }
+
+    if (g_power_loss_latched)
+    {
+        if ((g_power_stage == SVC_POWER_STAGE_SHUTDOWN_PENDING)
+            || (g_power_stage == SVC_POWER_STAGE_SHUTDOWN_IN_PROGRESS))
+        {
+            if (svc_power_get_shutdown_pending_elapsed_ms() >= APP_PWR_SHUTDOWN_IN_PROGRESS_MS)
+            {
+                return SVC_POWER_STAGE_SHUTDOWN_IN_PROGRESS;
+            }
+
+            return SVC_POWER_STAGE_SHUTDOWN_PENDING;
+        }
+
+        if ((g_supercap_low_confirm_count >= supercap_low_confirm_target)
+            || (svc_power_get_hold_elapsed_ms() >= APP_PWR_HOLD_PREPARE_TIMEOUT_MS))
+        {
+            return SVC_POWER_STAGE_SHUTDOWN_PENDING;
+        }
+
         return SVC_POWER_STAGE_SUPERCAP_HOLD;
     }
 
     return SVC_POWER_STAGE_MAIN_OFF;
+}
+
+static void svc_power_handle_final_power_cut(void)
+{
+    rt_uint32_t pending_ms;
+
+    if (g_power_stage != SVC_POWER_STAGE_SHUTDOWN_IN_PROGRESS)
+    {
+        return;
+    }
+
+    pending_ms = svc_power_get_shutdown_pending_elapsed_ms();
+
+    if ((g_final_soc_cut_done == RT_FALSE)
+        && (pending_ms >= APP_PWR_FINAL_SOC_CUT_DELAY_MS))
+    {
+        g_final_soc_cut_done = RT_TRUE;
+        svc_power_cut_soc_outputs();
+        rt_kprintf("PWR action: cut PWR_SOC_EN/PWR_24V_EN/SUPER_C_CHRG\r\n");
+    }
+
+    if ((g_final_hold_cut_done == RT_FALSE)
+        && (pending_ms >= APP_PWR_FINAL_HOLD_CUT_DELAY_MS))
+    {
+        g_final_hold_cut_done = RT_TRUE;
+        rt_kprintf("PWR action: release MCU_PWR_HOLD\r\n");
+        svc_power_release_mcu_hold();
+    }
+}
+
+static void svc_power_handle_stage_transition(svc_power_stage_t new_stage)
+{
+    if (new_stage == g_power_stage)
+    {
+        return;
+    }
+
+    if (new_stage == SVC_POWER_STAGE_SUPERCAP_HOLD)
+    {
+        g_supercap_hold_enter_tick = rt_tick_get();
+        g_shutdown_pending_enter_tick = 0;
+        g_shutdown_prepare_done = RT_FALSE;
+        g_final_soc_cut_done = RT_FALSE;
+        g_final_hold_cut_done = RT_FALSE;
+
+        /* 主电刚掉时先关背光，降低功耗并为后续关机收尾做准备。 */
+        lcd_backlight_off();
+        rt_kprintf("PWR event: enter SUPERCAP_HOLD, backlight off\r\n");
+    }
+    else if ((new_stage == SVC_POWER_STAGE_SHUTDOWN_PENDING) && (g_shutdown_prepare_done == RT_FALSE))
+    {
+        if (g_supercap_hold_enter_tick == 0)
+        {
+            g_supercap_hold_enter_tick = rt_tick_get();
+        }
+        g_shutdown_pending_enter_tick = rt_tick_get();
+        g_shutdown_prepare_done = RT_TRUE;
+        g_final_soc_cut_done = RT_FALSE;
+        g_final_hold_cut_done = RT_FALSE;
+
+        lcd_backlight_off();
+        rt_kprintf("PWR event: enter SHUTDOWN_PENDING, hold=%lums ready=%d\r\n",
+                   svc_power_get_hold_elapsed_ms(),
+                   g_supercap_ready);
+    }
+    else if ((new_stage == SVC_POWER_STAGE_SHUTDOWN_IN_PROGRESS)
+          && (g_power_stage != SVC_POWER_STAGE_SHUTDOWN_IN_PROGRESS))
+    {
+        rt_kprintf("PWR event: enter SHUTDOWN_IN_PROGRESS, pending=%lums\r\n",
+                   svc_power_get_shutdown_pending_elapsed_ms());
+    }
+    else if ((new_stage == SVC_POWER_STAGE_STANDBY)
+          || (new_stage == SVC_POWER_STAGE_ACC_ACTIVE)
+          || (new_stage == SVC_POWER_STAGE_ON_ACTIVE)
+          || (new_stage == SVC_POWER_STAGE_MAIN_OFF))
+    {
+        g_supercap_hold_enter_tick = 0;
+        g_shutdown_pending_enter_tick = 0;
+        g_shutdown_prepare_done = RT_FALSE;
+        g_final_soc_cut_done = RT_FALSE;
+        g_final_hold_cut_done = RT_FALSE;
+    }
+
+    g_power_stage = new_stage;
 }
 
 static void svc_power_thread_entry(void *arg)
@@ -91,19 +402,26 @@ static void svc_power_thread_entry(void *arg)
         const app_adc_snapshot_t *adc_snapshot;
         const app_vehicle_io_state_t *vehicle_state;
         svc_power_stage_t power_stage;
+        rt_uint32_t hold_ms;
 
         adc_snapshot = svc_adc_get_snapshot();
         vehicle_state = svc_vehicle_io_get_state();
         power_stage = svc_power_eval_stage(adc_snapshot, vehicle_state);
 
-        rt_kprintf("PWR: BAT24=%lumV SUPER=%lumV ACC=%d ON=%d LI=%lumV CHRG=%d STDBY=%d STAGE=%s\r\n",
+        svc_power_handle_stage_transition(power_stage);
+        svc_power_handle_final_power_cut();
+        hold_ms = svc_power_get_hold_elapsed_ms();
+
+        rt_kprintf("PWR: BAT24=%lumV SUPER=%lumV READY=%d ACC=%d ON=%d LI=%lumV CHRG=%d STDBY=%d HOLD=%lums STAGE=%s\r\n",
                    adc_snapshot->est_bat24_mv,
                    adc_snapshot->est_super_c_mv,
+                   g_supercap_ready,
                    vehicle_state->wk_acc,
                    vehicle_state->wk_on,
                    vehicle_state->li_bat_est_mv,
                    vehicle_state->li_bat_chrg,
                    vehicle_state->li_bat_stdby,
+                   hold_ms,
                    svc_power_stage_to_str(power_stage));
         rt_thread_mdelay(APP_POWER_TASK_PERIOD_MS);
     }
@@ -112,6 +430,20 @@ static void svc_power_thread_entry(void *arg)
 int svc_power_init(void)
 {
     /* 当前阶段先保留统一初始化入口。 */
+    svc_power_init_ctrl_pins();
+    g_power_stage = SVC_POWER_STAGE_UNKNOWN;
+    g_supercap_hold_enter_tick = 0;
+    g_shutdown_pending_enter_tick = 0;
+    g_power_loss_latched = RT_FALSE;
+    g_shutdown_prepare_done = RT_FALSE;
+    g_supercap_ready = RT_FALSE;
+    g_prev_main_present = RT_FALSE;
+    g_main_present_confirm_count = 0;
+    g_main_loss_confirm_count = 0;
+    g_supercap_ready_confirm_count = 0;
+    g_supercap_low_confirm_count = 0;
+    g_final_soc_cut_done = RT_FALSE;
+    g_final_hold_cut_done = RT_FALSE;
     return RT_EOK;
 }
 
