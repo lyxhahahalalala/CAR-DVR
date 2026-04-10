@@ -618,6 +618,7 @@ void board_init_i2c(I2C_Type *ptr);
 void board_init_can(MCAN_Type *ptr);
 
 void board_init_gpio_pins(void);
+void board_init_io_pins(void);
 void board_init_spi_pins(SPI_Type *ptr);
 void board_init_spi_pins_with_gpio_as_cs(SPI_Type *ptr);
 void board_write_spi_cs(uint32_t pin, uint8_t state);

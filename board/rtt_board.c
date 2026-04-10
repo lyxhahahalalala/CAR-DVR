@@ -8,6 +8,8 @@
 #include "rtt_board.h"
 #include "hpm_uart_drv.h"
 #include "hpm_gpio_drv.h"
+#include "hpm_gpiom_drv.h"
+#include "hpm_gpiom_soc_drv.h"
 #include "hpm_pmp_drv.h"
 #include "assert.h"
 #include "hpm_clock_drv.h"
@@ -54,21 +56,37 @@ void rtt_board_init(void)
 
 void app_init_led_pins(void)
 {
-    board_init_led_pins();
-    gpio_set_pin_output(BOARD_LED_GPIO_CTRL, BOARD_LED_GPIO_INDEX, BOARD_LED_GPIO_PIN);
-    gpio_write_pin(BOARD_LED_GPIO_CTRL, BOARD_LED_GPIO_INDEX, BOARD_LED_GPIO_PIN, BOARD_LED_OFF_LEVEL);
+    /*
+     * 杩愯鐏娇鐢?PC10銆?     * 杩欓噷鐩存帴鍒濆鍖?PC10锛岄伩鍏嶇户缁蛋 board.h 閲岄粯璁ょ殑 RGB LED 鏄犲皠銆?     */
+    HPM_IOC->PAD[IOC_PAD_PC10].FUNC_CTL = IOC_PC10_FUNC_CTL_GPIO_C_10;
+    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 10, gpiom_soc_gpio0);
+    gpio_set_pin_output(HPM_GPIO0, GPIO_OE_GPIOC, 10);
+    gpio_write_pin(HPM_GPIO0, GPIO_DO_GPIOC, 10, APP_LED_OFF);
 
     /* PWR_SOC_EN -> PC12, output high */
     HPM_IOC->PAD[IOC_PAD_PC12].FUNC_CTL = IOC_PC12_FUNC_CTL_GPIO_C_12;
-    //gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 12, gpiom_soc_gpio0);
+    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 12, gpiom_soc_gpio0);
     gpio_set_pin_output(HPM_GPIO0, GPIO_OE_GPIOC, 12);
     gpio_write_pin(HPM_GPIO0, GPIO_DO_GPIOC, 12, 1);
+
+    /* MCU_SUPER_C_CHRG -> PC13, default high to allow super-cap charging */
+    HPM_IOC->PAD[IOC_PAD_PC13].FUNC_CTL = IOC_PC13_FUNC_CTL_GPIO_C_13;
+    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 13, gpiom_soc_gpio0);
+    gpio_set_pin_output(HPM_GPIO0, GPIO_OE_GPIOC, 13);
+    gpio_write_pin(HPM_GPIO0, GPIO_DO_GPIOC, 13, 1);
 
 }
 
 void app_led_write(uint32_t index, bool state)
 {
-   gpio_write_pin(BOARD_LED_GPIO_CTRL, BOARD_LED_GPIO_INDEX, BOARD_LED_GPIO_PIN, state);
+    switch (index)
+    {
+    case APP_LED0:
+        gpio_write_pin(HPM_GPIO0, GPIO_DO_GPIOC, 10, state);
+        break;
+    default:
+        break;
+    }
 }
 
 

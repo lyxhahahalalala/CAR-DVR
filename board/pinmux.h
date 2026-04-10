@@ -38,6 +38,8 @@ void init_trgmux_pins(uint32_t pin);
 void init_pla_pins(void);
 void init_lin_pins(LIN_Type *ptr);
 void init_sdm_pins(void);
+void init_io_pins(void);
+void init_input_switch_pins(void);
 void init_pla_tamagawa_pins(void);
 void init_motor_over_zero_sensorless_adc_pins(void);
 void init_tamper_pins(void);

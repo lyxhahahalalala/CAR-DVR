@@ -14,7 +14,7 @@
 
 /* gpio section */
 #define APP_LED0         (0U)
-#define APP_LED0_PIN_NUM GET_PIN(B, 19)
+#define APP_LED0_PIN_NUM GET_PIN(C, 10)
 #define APP_LED_ON (1)
 #define APP_LED_OFF (0)
 

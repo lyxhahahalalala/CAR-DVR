@@ -4,13 +4,40 @@
 
 # Add inputs and outputs from these tool invocations to the build variables 
 C_SRCS += \
-../applications/main.c 
+../applications/app_init.c \
+../applications/app_task.c \
+../applications/main.c \
+../applications/svc_adc.c \
+../applications/svc_can.c \
+../applications/svc_lcd.c \
+../applications/svc_led.c \
+../applications/svc_power.c \
+../applications/svc_storage.c \
+../applications/svc_vehicle_io.c 
 
 OBJS += \
-./applications/main.o 
+./applications/app_init.o \
+./applications/app_task.o \
+./applications/main.o \
+./applications/svc_adc.o \
+./applications/svc_can.o \
+./applications/svc_lcd.o \
+./applications/svc_led.o \
+./applications/svc_power.o \
+./applications/svc_storage.o \
+./applications/svc_vehicle_io.o 
 
 C_DEPS += \
-./applications/main.d 
+./applications/app_init.d \
+./applications/app_task.d \
+./applications/main.d \
+./applications/svc_adc.d \
+./applications/svc_can.d \
+./applications/svc_lcd.d \
+./applications/svc_led.d \
+./applications/svc_power.d \
+./applications/svc_storage.d \
+./applications/svc_vehicle_io.d 
 
 
 # Each subdirectory must supply rules for building sources it contributes

@@ -351,6 +351,11 @@ void board_init_gpio_pins(void)
     init_gpio_pins();
 }
 
+void board_init_io_pins(void)
+{
+    init_io_pins();
+}
+
 void board_init_spi_pins(SPI_Type *ptr)
 {
     init_spi_pins(ptr);
@@ -741,4 +746,3 @@ uint32_t board_init_gptmr_clock(GPTMR_Type *ptr)
     }
     return freq;
 }
-

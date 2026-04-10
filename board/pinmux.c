@@ -360,10 +360,17 @@ void init_gpio_pins(void)
 
 void init_spi_pins(SPI_Type *ptr)
 {
-    if (ptr == HPM_SPI1) {
+    if (ptr == HPM_SPI0) {
+        /*
+         * LCD 使用只写型 SPI 接口，按原理图整理如下：
+         * PA28 -> LCD_CSN  -> SPI0_CSN
+         * PA29 -> LCD_A0   -> GPIO_A_29
+         * PA30 -> LCD_SCK  -> SPI0_SCLK
+         * PA31 -> LCD_SDA  -> SPI0_MOSI
+         */
         HPM_IOC->PAD[IOC_PAD_PA28].FUNC_CTL = IOC_PA28_FUNC_CTL_SPI0_CSN;
         HPM_IOC->PAD[IOC_PAD_PA31].FUNC_CTL = IOC_PA31_FUNC_CTL_SPI0_MOSI;
-        HPM_IOC->PAD[IOC_PAD_PA29].FUNC_CTL = IOC_PA29_FUNC_CTL_SPI0_MISO;
+        HPM_IOC->PAD[IOC_PAD_PA29].FUNC_CTL = IOC_PA29_FUNC_CTL_GPIO_A_29;
         HPM_IOC->PAD[IOC_PAD_PA30].FUNC_CTL = IOC_PA30_FUNC_CTL_SPI0_SCLK | IOC_PAD_FUNC_CTL_LOOP_BACK_SET(1);
 
         /* set max frequency slew rate(200M) */
@@ -376,10 +383,17 @@ void init_spi_pins(SPI_Type *ptr)
 
 void init_spi_pins_with_gpio_as_cs(SPI_Type *ptr)
 {
-    if (ptr == HPM_SPI1) {
+    if (ptr == HPM_SPI0) {
+        /*
+         * 当片选使用 GPIO 控制时：
+         * PA28 -> LCD_CSN  -> GPIO_A_28
+         * PA29 -> LCD_A0   -> GPIO_A_29
+         * PA30 -> LCD_SCK  -> SPI0_SCLK
+         * PA31 -> LCD_SDA  -> SPI0_MOSI
+         */
         HPM_IOC->PAD[IOC_PAD_PA28].FUNC_CTL = IOC_PA28_FUNC_CTL_GPIO_A_28;
         HPM_IOC->PAD[IOC_PAD_PA31].FUNC_CTL = IOC_PA31_FUNC_CTL_SPI0_MOSI;
-        HPM_IOC->PAD[IOC_PAD_PA29].FUNC_CTL = IOC_PA29_FUNC_CTL_SPI0_MISO;
+        HPM_IOC->PAD[IOC_PAD_PA29].FUNC_CTL = IOC_PA29_FUNC_CTL_GPIO_A_29;
         HPM_IOC->PAD[IOC_PAD_PA30].FUNC_CTL = IOC_PA30_FUNC_CTL_SPI0_SCLK | IOC_PAD_FUNC_CTL_LOOP_BACK_SET(1);
 
         /* set max frequency slew rate(200M) */
