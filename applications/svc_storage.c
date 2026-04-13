@@ -10,7 +10,7 @@ static void svc_storage_thread_entry(void *arg)
     while (1)
     {
         /* 后续补充参数保存和异步存储逻辑。 */
-        rt_kprintf("444\r\n");
+        APP_NON_CAN_LOG("444\r\n");
         rt_thread_mdelay(APP_STORAGE_TASK_PERIOD_MS);
     }
 }
@@ -33,7 +33,7 @@ int svc_storage_task_start(void)
                               APP_STORAGE_TASK_TICK);
     if (thread == RT_NULL)
     {
-        rt_kprintf("storage thread create failed\r\n");
+        APP_NON_CAN_LOG("storage thread create failed\r\n");
         return -RT_ERROR;
     }
 

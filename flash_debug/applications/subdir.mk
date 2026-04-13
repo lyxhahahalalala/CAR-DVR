@@ -4,6 +4,7 @@
 
 # Add inputs and outputs from these tool invocations to the build variables 
 C_SRCS += \
+../applications/app_can.c \
 ../applications/app_init.c \
 ../applications/app_task.c \
 ../applications/main.c \
@@ -16,6 +17,7 @@ C_SRCS += \
 ../applications/svc_vehicle_io.c 
 
 OBJS += \
+./applications/app_can.o \
 ./applications/app_init.o \
 ./applications/app_task.o \
 ./applications/main.o \
@@ -28,6 +30,7 @@ OBJS += \
 ./applications/svc_vehicle_io.o 
 
 C_DEPS += \
+./applications/app_can.d \
 ./applications/app_init.d \
 ./applications/app_task.d \
 ./applications/main.d \

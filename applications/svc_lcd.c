@@ -97,7 +97,7 @@ static void svc_lcd_thread_entry(void *arg)
     while (1)
     {
         /* 当前阶段先验证线程已经启动，后续再补 LCD 时序和刷屏逻辑。 */
-        rt_kprintf("555\r\n");
+        APP_NON_CAN_LOG("555\r\n");
         rt_thread_mdelay(APP_LCD_TASK_PERIOD_MS);
     }
 }
@@ -127,7 +127,7 @@ int svc_lcd_task_start(void)
                               APP_LCD_TASK_TICK);
     if (thread == RT_NULL)
     {
-        rt_kprintf("lcd thread create failed\r\n");
+        APP_NON_CAN_LOG("lcd thread create failed\r\n");
         return -RT_ERROR;
     }
 

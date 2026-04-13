@@ -58,25 +58,25 @@ static int svc_adc_channel_enable(rt_adc_device_t adc_dev)
 {
     if (rt_adc_enable(adc_dev, APP_ADC_CH_BAT_24V) != RT_EOK)
     {
-        rt_kprintf("enable ADC_CH_BAT_24V failed\r\n");
+        APP_NON_CAN_LOG("enable ADC_CH_BAT_24V failed\r\n");
         return -RT_ERROR;
     }
 
     if (rt_adc_enable(adc_dev, APP_ADC_CH_LI_BAT_4V2) != RT_EOK)
     {
-        rt_kprintf("enable ADC_CH_LI_BAT_4V2 failed\r\n");
+        APP_NON_CAN_LOG("enable ADC_CH_LI_BAT_4V2 failed\r\n");
         return -RT_ERROR;
     }
 
     if (rt_adc_enable(adc_dev, APP_ADC_CH_SUPER_C_5V) != RT_EOK)
     {
-        rt_kprintf("enable ADC_CH_SUPER_C_5V failed\r\n");
+        APP_NON_CAN_LOG("enable ADC_CH_SUPER_C_5V failed\r\n");
         return -RT_ERROR;
     }
 
     if (rt_adc_enable(adc_dev, APP_ADC_CH_KEY) != RT_EOK)
     {
-        rt_kprintf("enable ADC_CH_KEY failed\r\n");
+        APP_NON_CAN_LOG("enable ADC_CH_KEY failed\r\n");
         return -RT_ERROR;
     }
 
@@ -94,7 +94,7 @@ static void svc_adc_thread_entry(void *arg)
     adc_dev = (rt_adc_device_t)rt_device_find(APP_ADC_DEV_NAME);
     if (adc_dev == RT_NULL)
     {
-        rt_kprintf("adc0 not found\r\n");
+        APP_NON_CAN_LOG("adc0 not found\r\n");
         return;
     }
 
@@ -103,21 +103,21 @@ static void svc_adc_thread_entry(void *arg)
         return;
     }
 
-    rt_kprintf("adc0 test start\r\n");
+    APP_NON_CAN_LOG("adc0 test start\r\n");
 
     while (1)
     {
         svc_adc_sample_update(adc_dev);
 
         /* 当前重点观察主电、超级电容和锂电的原始值及估算电压。 */
-        rt_kprintf("ADC: BAT24 raw=%lu est=%lumV SUPER5V raw=%lu est=%lumV LI4V2 raw=%lu est=%lumV KEY=%lu\r\n",
-                   g_adc_snapshot.raw_bat24,
-                   g_adc_snapshot.est_bat24_mv,
-                   g_adc_snapshot.raw_super_c,
-                   g_adc_snapshot.est_super_c_mv,
-                   g_adc_snapshot.raw_li_bat,
-                   g_adc_snapshot.est_li_bat_mv,
-                   g_adc_snapshot.raw_key);
+        APP_NON_CAN_LOG("ADC: BAT24 raw=%lu est=%lumV SUPER5V raw=%lu est=%lumV LI4V2 raw=%lu est=%lumV KEY=%lu\r\n",
+                        g_adc_snapshot.raw_bat24,
+                        g_adc_snapshot.est_bat24_mv,
+                        g_adc_snapshot.raw_super_c,
+                        g_adc_snapshot.est_super_c_mv,
+                        g_adc_snapshot.raw_li_bat,
+                        g_adc_snapshot.est_li_bat_mv,
+                        g_adc_snapshot.raw_key);
 
         rt_thread_mdelay(APP_ADC_SAMPLE_PERIOD_MS);
     }
@@ -142,7 +142,7 @@ int svc_adc_task_start(void)
                                   APP_ADC_TASK_TICK);
     if (adc_thread == RT_NULL)
     {
-        rt_kprintf("adc thread create failed\r\n");
+        APP_NON_CAN_LOG("adc thread create failed\r\n");
         return -RT_ERROR;
     }
 
