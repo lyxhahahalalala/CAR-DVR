@@ -36,6 +36,12 @@
 #define APP_LCD_TASK_STACK_SIZE      2048
 #define APP_LCD_TASK_PRIORITY        14
 #define APP_LCD_TASK_TICK            10
+#define APP_LCD_SPI_BUS_NAME         "spi0"
+#define APP_LCD_SPI_DEV_NAME         "lcd_spi0"
+#define APP_LCD_SPI_MAX_HZ           20000000UL
+#define APP_LCD_WIDTH                240U
+#define APP_LCD_HEIGHT               320U
+#define APP_LCD_COLOR_TEST_STEP_MS   1500U
 
 /* LED 测试参数 */
 #define APP_LED_TOGGLE_PERIOD_MS     500
@@ -156,5 +162,11 @@
 #define APP_IO_TASK_PERIOD_MS        1400
 #define APP_STORAGE_TASK_PERIOD_MS   1600
 #define APP_LCD_TASK_PERIOD_MS       1800
+
+/* CAN 验证配置 //GLM5.1 */
+#define APP_CAN_DEV_NAME             "can0"              /* 使用 MCAN0 //GLM5.1 */
+#define APP_CAN_BAUDRATE             CAN_BAUDRATE_500K   /* 500kbps，车载常见波特率 //GLM5.1 */
+#define APP_CAN_TEST_TX_ID           0x123               /* 测试发送帧 ID //GLM5.1 */
+#define APP_CAN_TEST_TX_PERIOD_MS    2000                /* 发送测试帧周期 //GLM5.1 */
 
 #endif /* APPLICATIONS_APP_CONFIG_H_ */
