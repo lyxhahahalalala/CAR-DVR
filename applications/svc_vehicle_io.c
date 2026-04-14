@@ -1,5 +1,3 @@
-#include <rtthread.h>
-
 #include "board.h"
 #include "hpm_gpio_drv.h"
 #include "app_config.h"
@@ -7,7 +5,7 @@
 #include "svc_vehicle_io.h"
 
 /*
- * 车辆输入与锂电状态：
+ * 车辆输入采集：
  * PC19 -> WK_ACC
  * PC20 -> WK_ON
  * PB22 -> LI_BAT_STDBY
@@ -35,12 +33,13 @@ static void svc_vehicle_io_update_state(void)
 {
     const app_adc_snapshot_t *adc_snapshot;
 
-    g_vehicle_io_state.wk_acc = gpio_read_pin(WK_ACC_GPIO_CTRL,
-                                              WK_ACC_GPIO_INDEX,
-                                              WK_ACC_PIN);
-    g_vehicle_io_state.wk_on = gpio_read_pin(WK_ON_GPIO_CTRL,
-                                             WK_ON_GPIO_INDEX,
-                                             WK_ON_PIN);
+    /* WK_ACC 和 WK_ON 经过三极管整形后，对 MCU 为低有效。 */
+    g_vehicle_io_state.wk_acc = (gpio_read_pin(WK_ACC_GPIO_CTRL,
+                                               WK_ACC_GPIO_INDEX,
+                                               WK_ACC_PIN) == 0U) ? 1U : 0U;
+    g_vehicle_io_state.wk_on = (gpio_read_pin(WK_ON_GPIO_CTRL,
+                                              WK_ON_GPIO_INDEX,
+                                              WK_ON_PIN) == 0U) ? 1U : 0U;
     g_vehicle_io_state.li_bat_stdby = gpio_read_pin(LI_BAT_STDBY_GPIO_CTRL,
                                                     LI_BAT_STDBY_GPIO_INDEX,
                                                     LI_BAT_STDBY_PIN);
@@ -59,7 +58,7 @@ static void svc_vehicle_io_thread_entry(void *arg)
 
     while (1)
     {
-        /* 先把电源相关输入收进服务层，后续再扩展其它硬线输入。 */
+        /* 周期更新车辆输入状态，供电源管理和后续业务读取。 */
         svc_vehicle_io_update_state();
 
         APP_NON_CAN_LOG("333\r\n");
@@ -76,7 +75,7 @@ static void svc_vehicle_io_thread_entry(void *arg)
 
 int svc_vehicle_io_init(void)
 {
-    /* 初始化与电源状态相关的输入引脚。 */
+    /* 初始化输入脚并清零软件状态。 */
     board_init_io_pins();
     init_input_switch_pins();
     rt_memset(&g_vehicle_io_state, 0, sizeof(g_vehicle_io_state));

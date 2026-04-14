@@ -337,12 +337,13 @@
 #define BSP_UART3_RX_BUFSIZE 1024
 #define BSP_UART3_TX_BUFSIZE 0
 #define BSP_UART3_IRQ_PRIORITY 1
-#define BSP_USING_SPI
-#define BSP_USING_SPI0
-#define BSP_SPI0_USING_DMA
-#define BSP_SPI0_IRQ_PRIORITY 1
-#define BSP_SPI0_USING_HARD_CS
-#define BSP_SPI0_USING_SINGLE_IO
+/* SPI0 由 LCD 驱动直接操作，禁用 RT-Thread SPI 框架对 SPI0 的托管，避免 SPIACTIVE 冲突 */
+/* #define BSP_USING_SPI */
+/* #define BSP_USING_SPI0 */
+/* #define BSP_SPI0_USING_DMA */
+/* #define BSP_SPI0_IRQ_PRIORITY 1 */
+/* #define BSP_SPI0_USING_HARD_CS */
+/* #define BSP_SPI0_USING_SINGLE_IO */
 #define BSP_USING_RTC
 #define BSP_USING_GPTMR
 #define BSP_USING_I2C

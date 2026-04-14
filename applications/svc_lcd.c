@@ -1,4 +1,4 @@
-#include <rtthread.h>
+﻿#include <rtthread.h>
 
 #include "board.h"
 #include "hpm_gpiom_drv.h"
@@ -44,6 +44,35 @@
 #define LCD_A0_GPIO_OE          GPIO_OE_GPIOA
 #define LCD_A0_PIN              29
 
+#define LCD_SCK_GPIO_CTRL       HPM_GPIO0
+#define LCD_SCK_GPIO_INDEX      GPIO_DO_GPIOA
+#define LCD_SCK_GPIO_OE         GPIO_OE_GPIOA
+#define LCD_SCK_PIN             30
+
+#define LCD_SDA_GPIO_CTRL       HPM_GPIO0
+#define LCD_SDA_GPIO_INDEX      GPIO_DO_GPIOA
+#define LCD_SDA_GPIO_OE         GPIO_OE_GPIOA
+#define LCD_SDA_PIN             31
+
+#define LCD_SW_SPI_SWAP_LINES   0
+#define LCD_SW_SPI_IDLE_HIGH    1
+
+#if LCD_SW_SPI_SWAP_LINES
+#define LCD_CLK_GPIO_CTRL       LCD_SDA_GPIO_CTRL
+#define LCD_CLK_GPIO_INDEX      LCD_SDA_GPIO_INDEX
+#define LCD_CLK_PIN             LCD_SDA_PIN
+#define LCD_DAT_GPIO_CTRL       LCD_SCK_GPIO_CTRL
+#define LCD_DAT_GPIO_INDEX      LCD_SCK_GPIO_INDEX
+#define LCD_DAT_PIN             LCD_SCK_PIN
+#else
+#define LCD_CLK_GPIO_CTRL       LCD_SCK_GPIO_CTRL
+#define LCD_CLK_GPIO_INDEX      LCD_SCK_GPIO_INDEX
+#define LCD_CLK_PIN             LCD_SCK_PIN
+#define LCD_DAT_GPIO_CTRL       LCD_SDA_GPIO_CTRL
+#define LCD_DAT_GPIO_INDEX      LCD_SDA_GPIO_INDEX
+#define LCD_DAT_PIN             LCD_SDA_PIN
+#endif
+
 /* ----- ST7567 命令字 ----- */
 #define ST7567_CMD_DISPLAY_OFF      0xAE  /* 关闭显示 */
 #define ST7567_CMD_DISPLAY_ON       0xAF  /* 打开显示 */
@@ -76,7 +105,7 @@
  * 屏幕全白无内容时说明 V0 不够，需提高 EV 或 RR。
  * 调试顺序：0x1C → 0x28 → 0x30 → 0x38，观察是否出现黑色像素。
  */
-#define ST7567_INIT_EV              0x38
+#define ST7567_INIT_EV              0x28
 /*
  * 内部电阻比（RR）: 0x00(3.0) ~ 0x07(6.5)，步长 0.5。
  * 公式：V0 = RR × [(99 + EV) / 162] × 2.1
@@ -90,47 +119,28 @@
 /* LCD 有效页数（每页 8 行，共 64 行 = 8 页；icon 行作为第 8 页不使用）*/
 #define LCD_PAGES   8
 
-/* ----- SPI 初始化 ----- */
+/* ----- 软件 SPI 初始化 ----- */
 static void svc_lcd_spi_hw_init(void)
 {
-    uint32_t spi_clk_hz;
-    spi_timing_config_t timing_cfg;
-    spi_format_config_t format_cfg;
+    HPM_IOC->PAD[IOC_PAD_PA30].FUNC_CTL = IOC_PA30_FUNC_CTL_GPIO_A_30;
+    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_SCK_PIN, gpiom_soc_gpio0);
+    gpio_set_pin_output(LCD_SCK_GPIO_CTRL, LCD_SCK_GPIO_OE, LCD_SCK_PIN);
 
-    /* 使能 SPI0 时钟（board.c 中已添加 SPI0 分支，时钟源 24MHz/12 = 2MHz）*/
-    spi_clk_hz = board_init_spi_clock(HPM_SPI0);
-    if (spi_clk_hz == 0) {
-        /* 备用：直接用 clock_spi0 时钟频率估算 */
-        spi_clk_hz = 2000000UL;
-    }
+    HPM_IOC->PAD[IOC_PAD_PA31].FUNC_CTL = IOC_PA31_FUNC_CTL_GPIO_A_31;
+    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_SDA_PIN, gpiom_soc_gpio0);
+    gpio_set_pin_output(LCD_SDA_GPIO_CTRL, LCD_SDA_GPIO_OE, LCD_SDA_PIN);
 
-    /* 时序配置：SPI 波特率 1MHz（2MHz / 2 = 1MHz，div_integer=2 为偶数，满足要求）*/
-    spi_master_get_default_timing_config(&timing_cfg);
-    timing_cfg.master_config.clk_src_freq_in_hz = spi_clk_hz;
-    timing_cfg.master_config.sclk_freq_in_hz    = 1000000UL;
-    spi_master_timing_init(HPM_SPI0, &timing_cfg);
-
-    /* 格式配置：主机模式，8 位，MSB first，Mode 3（CPOL=1，CPHA=1）
-     * ST7567 在 SCK 上升沿采样数据，Mode 0 / Mode 3 均兼容。
-     * HPM 默认即为 Mode 3（spi_sclk_high_idle + spi_sclk_sampling_even_clk_edges）。
-     */
-    spi_master_get_default_format_config(&format_cfg);
-    format_cfg.common_config.data_len_in_bits = 8;
-    format_cfg.common_config.lsb              = false;   /* MSB first */
-    format_cfg.common_config.mode             = spi_master_mode;
-    /* 保持默认 CPOL=1 / CPHA=1（Mode 3），与 ST7567 兼容 */
-    spi_format_init(HPM_SPI0, &format_cfg);
+#if LCD_SW_SPI_IDLE_HIGH
+    gpio_write_pin(LCD_CLK_GPIO_CTRL, LCD_CLK_GPIO_INDEX, LCD_CLK_PIN, 1);
+#else
+    gpio_write_pin(LCD_CLK_GPIO_CTRL, LCD_CLK_GPIO_INDEX, LCD_CLK_PIN, 0);
+#endif
+    gpio_write_pin(LCD_DAT_GPIO_CTRL, LCD_DAT_GPIO_INDEX, LCD_DAT_PIN, 0);
 }
 
 /* ----- GPIO 初始化 ----- */
 static void svc_lcd_ctrl_pins_init(void)
 {
-    /*
-     * SPI0 引脚：PA30 → SCK，PA31 → MOSI；
-     * CS（PA28）和 A0（PA29）用 GPIO 软件控制。
-     */
-    board_init_spi_pins_with_gpio_as_cs(HPM_SPI0);
-
     /* LCD_RSTB（PA03）*/
     HPM_IOC->PAD[IOC_PAD_PA03].FUNC_CTL = IOC_PA03_FUNC_CTL_GPIO_A_03;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_RSTB_PIN, gpiom_soc_gpio0);
@@ -142,12 +152,29 @@ static void svc_lcd_ctrl_pins_init(void)
     gpio_set_pin_output(LCD_BACKLIGHT_GPIO_CTRL, LCD_BACKLIGHT_GPIO_OE, LCD_BACKLIGHT_PIN);
 
     /* LCD_CSN（PA28）*/
+    HPM_IOC->PAD[IOC_PAD_PA28].FUNC_CTL = IOC_PA28_FUNC_CTL_GPIO_A_28;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_CSN_PIN, gpiom_soc_gpio0);
     gpio_set_pin_output(LCD_CSN_GPIO_CTRL, LCD_CSN_GPIO_OE, LCD_CSN_PIN);
 
     /* LCD_A0（PA29）*/
+    HPM_IOC->PAD[IOC_PAD_PA29].FUNC_CTL = IOC_PA29_FUNC_CTL_GPIO_A_29;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_A0_PIN, gpiom_soc_gpio0);
     gpio_set_pin_output(LCD_A0_GPIO_CTRL, LCD_A0_GPIO_OE, LCD_A0_PIN);
+}
+
+static void lcd_spi_delay_us(void)
+{
+    board_delay_us(1);
+}
+
+static void lcd_sck_set(rt_bool_t high)
+{
+    gpio_write_pin(LCD_CLK_GPIO_CTRL, LCD_CLK_GPIO_INDEX, LCD_CLK_PIN, high ? 1 : 0);
+}
+
+static void lcd_sda_set(rt_bool_t high)
+{
+    gpio_write_pin(LCD_DAT_GPIO_CTRL, LCD_DAT_GPIO_INDEX, LCD_DAT_PIN, high ? 1 : 0);
 }
 
 /* ----- GPIO 控制函数 ----- */
@@ -184,19 +211,48 @@ void lcd_csn_set(rt_bool_t active)
     gpio_write_pin(LCD_CSN_GPIO_CTRL, LCD_CSN_GPIO_INDEX, LCD_CSN_PIN, active ? 0 : 1);
 }
 
+static void lcd_diag_toggle_line(const char *name, void (*set_fn)(rt_bool_t), rt_bool_t active_high)
+{
+    APP_NON_CAN_LOG("LCD DIAG: toggle %s\r\n", name);
+    for (int i = 0; i < 20; i++) {
+        set_fn(active_high ? RT_TRUE : RT_FALSE);
+        rt_thread_mdelay(100);
+        set_fn(active_high ? RT_FALSE : RT_TRUE);
+        rt_thread_mdelay(100);
+    }
+}
+
+static void lcd_diag_toggle_rstb(rt_bool_t high)
+{
+    gpio_write_pin(LCD_RSTB_GPIO_CTRL, LCD_RSTB_GPIO_INDEX, LCD_RSTB_PIN, high ? 1 : 0);
+}
 /* ----- SPI 字节写 ----- */
 static void lcd_spi_write_byte(uint8_t byte)
 {
-    hpm_stat_t stat;
-    spi_control_config_t ctrl_cfg;
-    spi_master_get_default_control_config(&ctrl_cfg);
-    ctrl_cfg.common_config.trans_mode = spi_trans_write_only;
+    for (uint8_t bit = 0; bit < 8; bit++) {
+#if LCD_SW_SPI_IDLE_HIGH
+        lcd_sck_set(RT_TRUE);
+        lcd_sda_set((byte & 0x80U) != 0U ? RT_TRUE : RT_FALSE);
+        lcd_spi_delay_us();
 
-    stat = spi_transfer(HPM_SPI0, &ctrl_cfg, NULL, NULL, &byte, 1, NULL, 0);
-    if (stat != status_success) {
-        APP_NON_CAN_LOG("SPI err: 0x%x byte=0x%02x\r\n", (unsigned)stat, byte);
+        lcd_sck_set(RT_FALSE);
+        lcd_spi_delay_us();
+#else
+        lcd_sck_set(RT_FALSE);
+        lcd_sda_set((byte & 0x80U) != 0U ? RT_TRUE : RT_FALSE);
+        lcd_spi_delay_us();
+
+        lcd_sck_set(RT_TRUE);
+        lcd_spi_delay_us();
+#endif
+        byte <<= 1;
     }
-    spi_wait_for_idle_status(HPM_SPI0);
+
+#if LCD_SW_SPI_IDLE_HIGH
+    lcd_sck_set(RT_TRUE);
+#else
+    lcd_sck_set(RT_FALSE);
+#endif
 }
 
 /* ----- 命令 / 数据写 ----- */
@@ -219,16 +275,12 @@ static void lcd_write_data(uint8_t dat)
 /* ----- 批量写数据（同一页连续列）----- */
 static void lcd_write_data_buf(const uint8_t *buf, uint16_t len)
 {
-    spi_control_config_t ctrl_cfg;
-    spi_master_get_default_control_config(&ctrl_cfg);
-    ctrl_cfg.common_config.trans_mode = spi_trans_write_only;
-
     lcd_csn_set(RT_TRUE);
     lcd_a0_set(RT_TRUE);    /* A0=1 → 数据 */
 
-    /* 分批发送（spi_transfer 每次最多 512 字节，实际这里最多 132 字节，够用）*/
-    spi_transfer(HPM_SPI0, &ctrl_cfg, NULL, NULL, (uint8_t *)buf, (uint32_t)len, NULL, 0);
-    spi_wait_for_idle_status(HPM_SPI0);
+    while (len-- > 0U) {
+        lcd_spi_write_byte(*buf++);
+    }
 
     lcd_csn_set(RT_FALSE);
 }
@@ -308,22 +360,16 @@ static void st7567_init_seq(void)
      * 实际 3.3V + X5 升压，等 120ms 足够。
      */
     rt_thread_mdelay(120);
-
     /* 9. 正常显示，不反色 */
     lcd_write_cmd(ST7567_CMD_INVERSE_OFF);
 
-    /*
-     * ★ 诊断测试：发送 0xA5（ALL_PIXEL_ON）——全部像素强制点亮，不读 DDRAM。
-     *   若屏幕此时变黑/深色，说明 SPI 命令已被 ST7567 接收，驱动芯片和对比度均正常。
-     *   若屏幕仍然全白：检查 LCD 模块 VDD（FPC Pin1/5/12）是否有 3.3V。
-     *   确认正常后，将此行改回 ST7567_CMD_ALL_PIXEL_OFF（0xA4）。
-     */
-    lcd_write_cmd(ST7567_CMD_ALL_PIXEL_ON);   /* 0xA5：全亮（忽略 DDRAM）*/
+    /* 10. 先恢复正常显示模式（读 DDRAM），不在初始化阶段长期停留在 A5 */
+    lcd_write_cmd(ST7567_CMD_ALL_PIXEL_OFF);
 
-    /* 10. 清 DDRAM */
+    /* 11. 清 DDRAM */
     lcd_clear();
 
-    /* 11. 打开显示 */
+    /* 12. 打开显示 */
     lcd_write_cmd(ST7567_CMD_DISPLAY_ON);
 }
 
@@ -351,30 +397,35 @@ int svc_lcd_init(void)
 /* ----- LCD 任务线程 ----- */
 static void svc_lcd_thread_entry(void *arg)
 {
-    RT_UNUSED(arg);
-
     /*
      * Bring-up 验证步骤：
-     * 1. 先全亮（所有像素点亮），确认背光 + SPI + 驱动时序 OK
-     * 2. 打开背光
-     * 3. 延时后清屏，观察画面变化，确认刷屏流程正常
-     * 如果上述两步均正常，后续可接入字库 / 图形接口。
+     * 1. 先用 A5/A4 验证命令链路是否生效
+     * 2. 再用 DDRAM 全 1 / 全 0 验证显存写入链路
      */
 
-    /* 步骤 1：全亮验证 */
-    lcd_fill_all();
     lcd_backlight_on();
-    APP_NON_CAN_LOG("LCD: full-on test (backlight ON, all pixels ON)\r\n");
 
+    /* 步骤 1：A5 强制全亮，验证命令链路 */
+    lcd_write_cmd(ST7567_CMD_ALL_PIXEL_ON);
+    APP_NON_CAN_LOG("LCD: cmd A5 all-pixel-on\r\n");
     rt_thread_mdelay(3000);
 
-    /* 步骤 2：清屏，观察像素切换 */
-    lcd_clear();
-    APP_NON_CAN_LOG("LCD: cleared\r\n");
+    /* 步骤 2：A4 恢复正常显示模式 */
+    lcd_write_cmd(ST7567_CMD_ALL_PIXEL_OFF);
+    APP_NON_CAN_LOG("LCD: cmd A4 normal-display\r\n");
+    rt_thread_mdelay(1500);
 
+    /* 步骤 3：DDRAM 全 1，验证显存写入链路 */
+    lcd_fill_all();
+    APP_NON_CAN_LOG("LCD: DDRAM fill 0xFF\r\n");
+    rt_thread_mdelay(3000);
+
+    /* 步骤 4：DDRAM 全 0，验证清屏链路 */
+    lcd_clear();
+    APP_NON_CAN_LOG("LCD: DDRAM clear 0x00\r\n");
     rt_thread_mdelay(2000);
 
-    /* 步骤 3：循环交替全亮/清屏，方便示波器抓波形 */
+    /* 步骤 5：循环交替全亮/清屏，方便持续观察 */
     while (1)
     {
         lcd_fill_all();
@@ -403,3 +454,15 @@ int svc_lcd_task_start(void)
     rt_thread_startup(thread);
     return RT_EOK;
 }
+
+
+
+
+
+
+
+
+
+
+
+

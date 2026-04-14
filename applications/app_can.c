@@ -41,7 +41,7 @@ static rt_err_t app_can_rx_indicate(rt_device_t dev, rt_size_t size)
 
 static void app_can_dump_frame(const struct rt_can_msg *msg)
 {
-    rt_kprintf("CAN RX: id=0x%08x len=%d data=%02x %02x %02x %02x %02x %02x %02x %02x\r\n",
+    APP_CAN_LOG("CAN RX: id=0x%08x len=%d data=%02x %02x %02x %02x %02x %02x %02x %02x\r\n",
                msg->id,
                msg->len,
                msg->data[0],
@@ -98,7 +98,7 @@ static void app_can_tx_thread_entry(void *parameter)
 
             if (rt_device_write(g_can_dev, 0, &tx_msg, sizeof(tx_msg)) <= 0)
             {
-                rt_kprintf("CAN TX: send failed, id=0x%08x\r\n", tx_msg.id);
+                APP_CAN_LOG("CAN TX: send failed, id=0x%08x\r\n", tx_msg.id);
             }
         }
     }
@@ -119,7 +119,7 @@ static void app_can_err_thread_entry(void *parameter)
         {
             if ((status.errcode != last_errcode) || (status.lasterrtype != last_lasterr))
             {
-                rt_kprintf("CAN ST: err=%lu last=%lu rxerr=%lu txerr=%lu\r\n",
+                APP_CAN_LOG("CAN ST: err=%lu last=%lu rxerr=%lu txerr=%lu\r\n",
                            status.errcode,
                            status.lasterrtype,
                            status.rcverrcnt,
@@ -144,11 +144,11 @@ static void app_can_test_tx_thread_entry(void *parameter)
     {
         if (app_can_send(APP_CAN_TEST_TX_ID, test_data, sizeof(test_data)) != RT_EOK)
         {
-            rt_kprintf("CAN TEST: queue failed\r\n");
+            APP_CAN_LOG("CAN TEST: queue failed\r\n");
         }
         else
         {
-           // rt_kprintf("CAN TEST: queued id=0x%03x\r\n", APP_CAN_TEST_TX_ID);
+           // APP_CAN_LOG("CAN TEST: queued id=0x%03x\r\n", APP_CAN_TEST_TX_ID);
         }
 
         rt_thread_mdelay(APP_CAN_TEST_TX_PERIOD_MS);
@@ -181,14 +181,14 @@ int app_can_init(void)
     g_can_dev = rt_device_find(APP_CAN_DEV_NAME);
     if (g_can_dev == RT_NULL)
     {
-        rt_kprintf("CAN: device %s not found\r\n", APP_CAN_DEV_NAME);
+        APP_CAN_LOG("CAN: device %s not found\r\n", APP_CAN_DEV_NAME);
         return -RT_ERROR;
     }
 
     g_can_rx_sem = rt_sem_create(APP_CAN_RX_THREAD_NAME, 0, RT_IPC_FLAG_FIFO);
     if (g_can_rx_sem == RT_NULL)
     {
-        rt_kprintf("CAN: rx semaphore create failed\r\n");
+        APP_CAN_LOG("CAN: rx semaphore create failed\r\n");
         return -RT_ERROR;
     }
 
@@ -198,35 +198,35 @@ int app_can_init(void)
                                RT_IPC_FLAG_FIFO);
     if (g_can_tx_mq == RT_NULL)
     {
-        rt_kprintf("CAN: tx queue create failed\r\n");
+        APP_CAN_LOG("CAN: tx queue create failed\r\n");
         return -RT_ERROR;
     }
 
     result = rt_device_open(g_can_dev, RT_DEVICE_FLAG_INT_TX | RT_DEVICE_FLAG_INT_RX);
     if (result != RT_EOK)
     {
-        rt_kprintf("CAN: open %s failed, ret=%d\r\n", APP_CAN_DEV_NAME, result);
+        APP_CAN_LOG("CAN: open %s failed, ret=%d\r\n", APP_CAN_DEV_NAME, result);
         return -RT_ERROR;
     }
 
     result = rt_device_control(g_can_dev, RT_CAN_CMD_SET_BAUD, (void *)APP_CAN_BAUDRATE);
     if (result != RT_EOK)
     {
-        rt_kprintf("CAN: set baud failed, ret=%d\r\n", result);
+        APP_CAN_LOG("CAN: set baud failed, ret=%d\r\n", result);
         return -RT_ERROR;
     }
 
     result = rt_device_control(g_can_dev, RT_CAN_CMD_SET_MODE, (void *)RT_CAN_MODE_NORMAL);
     if (result != RT_EOK)
     {
-        rt_kprintf("CAN: set mode failed, ret=%d\r\n", result);
+        APP_CAN_LOG("CAN: set mode failed, ret=%d\r\n", result);
         return -RT_ERROR;
     }
 
     result = rt_device_set_rx_indicate(g_can_dev, app_can_rx_indicate);
     if (result != RT_EOK)
     {
-        rt_kprintf("CAN: set rx callback failed, ret=%d\r\n", result);
+        APP_CAN_LOG("CAN: set rx callback failed, ret=%d\r\n", result);
         return -RT_ERROR;
     }
 
@@ -248,7 +248,7 @@ int app_can_start(void)
                                        APP_CAN_RX_THREAD_TICK);
     if (g_can_rx_thread == RT_NULL)
     {
-        rt_kprintf("CAN: create rx thread failed\r\n");
+        APP_CAN_LOG("CAN: create rx thread failed\r\n");
         return -RT_ERROR;
     }
 
@@ -260,7 +260,7 @@ int app_can_start(void)
                                        APP_CAN_TX_THREAD_TICK);
     if (g_can_tx_thread == RT_NULL)
     {
-        rt_kprintf("CAN: create tx thread failed\r\n");
+        APP_CAN_LOG("CAN: create tx thread failed\r\n");
         return -RT_ERROR;
     }
 
@@ -272,7 +272,7 @@ int app_can_start(void)
                                         APP_CAN_ERR_THREAD_TICK);
     if (g_can_err_thread == RT_NULL)
     {
-        rt_kprintf("CAN: create error thread failed\r\n");
+        APP_CAN_LOG("CAN: create error thread failed\r\n");
         return -RT_ERROR;
     }
 
@@ -285,7 +285,7 @@ int app_can_start(void)
                                             APP_CAN_TEST_TX_THREAD_TICK);
     if (g_can_test_tx_thread == RT_NULL)
     {
-        rt_kprintf("CAN: create test tx thread failed\r\n");
+        APP_CAN_LOG("CAN: create test tx thread failed\r\n");
         return -RT_ERROR;
     }
 #endif

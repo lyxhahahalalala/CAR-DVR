@@ -44,7 +44,7 @@ void init_io_pins(void)
 
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, 3, gpiom_soc_gpio0);
     gpio_set_pin_output(HPM_GPIO0, GPIO_OE_GPIOA, 3);
-    gpio_write_pin(HPM_GPIO0, GPIO_DO_GPIOA, 3, 0);
+    gpio_write_pin(HPM_GPIO0, GPIO_DO_GPIOA, 3, 1);
 
     /* SW_CAM1_CHECK */
     HPM_IOC->PAD[IOC_PAD_PC09].FUNC_CTL = IOC_PC09_FUNC_CTL_GPIO_C_09;
