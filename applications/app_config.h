@@ -45,7 +45,7 @@
 #define APP_CAN_TEST_TX_PERIOD_MS     1000
 #define APP_CAN_TEST_TX_ID            0x123UL
 
-#define APP_DEBUG_CAN_ONLY           1
+#define APP_DEBUG_CAN_ONLY           0
 
 #if APP_DEBUG_CAN_ONLY
 #define APP_NON_CAN_LOG(...)         ((void)0)

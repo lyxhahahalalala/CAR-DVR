@@ -317,7 +317,12 @@ void board_init_i2c(I2C_Type *ptr)
 
 uint32_t board_init_spi_clock(SPI_Type *ptr)
 {
-    if (ptr == HPM_SPI1) {
+    if (ptr == HPM_SPI0) {
+        clock_add_to_group(clock_spi0, 0);
+        /* 使用 24MHz 晶振，12 分频 = 2MHz，方便后续 SPI 波特率整除 */
+        clock_set_source_divider(clock_spi0, clk_src_osc24m, 12);
+        return clock_get_frequency(clock_spi0);
+    } else if (ptr == HPM_SPI1) {
         clock_add_to_group(clock_spi1, 0);
         return clock_get_frequency(clock_spi1);
     } else if (ptr == HPM_SPI2) {

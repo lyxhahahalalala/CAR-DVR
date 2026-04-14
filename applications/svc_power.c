@@ -622,17 +622,17 @@ static void svc_power_thread_entry(void *arg)
         hold_ms = svc_power_get_hold_elapsed_ms();
 
         /* 缂備胶鍠嶇粩鎾箥閹惧啿绁憸鐗堟尭婢х娀鎮介崹顐ょ埍闁绘鍩栭埀顑跨筏缁辨繃绗熸径鍝ヨ壘闁哄娉曟鍥嚂閺冨洨娈堕柕?*/
-        APP_NON_CAN_LOG("PWR: BAT24=%lumV SUPER=%lumV READY=%d ACC=%d ON=%d LI=%lumV CHRG=%d STDBY=%d HOLD=%lums STAGE=%s\r\n",
-                        adc_snapshot->est_bat24_mv,
-                        adc_snapshot->est_super_c_mv,
-                        g_supercap_ready,
-                        vehicle_state->wk_acc,
-                        vehicle_state->wk_on,
-                        vehicle_state->li_bat_est_mv,
-                        vehicle_state->li_bat_chrg,
-                        vehicle_state->li_bat_stdby,
-                        hold_ms,
-                        svc_power_stage_to_str(power_stage));
+//        APP_NON_CAN_LOG("PWR: BAT24=%lumV SUPER=%lumV READY=%d ACC=%d ON=%d LI=%lumV CHRG=%d STDBY=%d HOLD=%lums STAGE=%s\r\n",
+//                        adc_snapshot->est_bat24_mv,
+//                        adc_snapshot->est_super_c_mv,
+//                        g_supercap_ready,
+//                        vehicle_state->wk_acc,
+//                        vehicle_state->wk_on,
+//                        vehicle_state->li_bat_est_mv,
+//                        vehicle_state->li_bat_chrg,
+//                        vehicle_state->li_bat_stdby,
+//                        hold_ms,
+//                        svc_power_stage_to_str(power_stage));
         rt_thread_mdelay(APP_POWER_TASK_PERIOD_MS);
     }
 }

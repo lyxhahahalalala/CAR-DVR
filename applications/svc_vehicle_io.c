@@ -63,13 +63,13 @@ static void svc_vehicle_io_thread_entry(void *arg)
         svc_vehicle_io_update_state();
 
         APP_NON_CAN_LOG("333\r\n");
-        APP_NON_CAN_LOG("VIN: ACC=%d ON=%d LI_STDBY=%d LI_CHRG=%d LI_RAW=%lu LI_EST=%lumV\r\n",
-                        g_vehicle_io_state.wk_acc,
-                        g_vehicle_io_state.wk_on,
-                        g_vehicle_io_state.li_bat_stdby,
-                        g_vehicle_io_state.li_bat_chrg,
-                        g_vehicle_io_state.li_bat_raw,
-                        g_vehicle_io_state.li_bat_est_mv);
+//        APP_NON_CAN_LOG("VIN: ACC=%d ON=%d LI_STDBY=%d LI_CHRG=%d LI_RAW=%lu LI_EST=%lumV\r\n",
+//                        g_vehicle_io_state.wk_acc,
+//                        g_vehicle_io_state.wk_on,
+//                        g_vehicle_io_state.li_bat_stdby,
+//                        g_vehicle_io_state.li_bat_chrg,
+//                        g_vehicle_io_state.li_bat_raw,
+//                        g_vehicle_io_state.li_bat_est_mv);
         rt_thread_mdelay(APP_IO_TASK_PERIOD_MS);
     }
 }

@@ -1,0 +1,453 @@
+ YXD-13264C-17F LCM 
+
+1.2
+
+
+
+SHENZHEN YEXINDA INDUSTRY CO.LTD
+
+
+
+ 
+
+
+3905000047 YW-G13264C(B2G-G) YXD-13264C-17F 6:00'Clock /132*64 STN ,/ / 65mm//
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[ShenZhen YEXINDA Industrial Co.,Ltd] (Tel): 0086-0755-86102612 (Fax): 0086-0755-86102632
+
+E-MAIL:YXD-TD@126.COM
+
+HTTP://WWW.YEXINDA.COM
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+YXD-13264C-17F LCM 
+
+[ShenZhen YEXINDA Industrial Co.,Ltd] (Tel): 0086-0755-86102612 (Fax): 0086-0755-86102632
+
+E-MAIL:YXD-TD@126.COM
+
+HTTP://WWW.YEXINDA.COM
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+
+
+
+VERSION1.0 VERSION1.1 VERSION1.2
+
+
+Preliminary 
+
+
+
+LZF LZF LZF
+
+
+2022-04-26 2024-03-26 2025-06-16
+
+
+  PCB 
+
+
+PCB   FPC 
+
+ YXD-13264C-17F LCM 
+
+
+
+
+1  2  3  4 
+5 
+6  7  8 
+
+1.2
+
+ YXD-13264C-17F LCM 
+LCM 
+
+1.2
+
+,,    0755-86102612 
+
+ 
+
+   
+
+ 
+ 0.1  
+
+
+
+ CMOS     1.  2. 
+ 3. 
+ 4. 
+ 5.  RH60%
+ 6. 
+
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+
+
+1.  2.  3.  PCB  4.  5.  6.  7.  PCB  PCB 
+
+
+
+ 1.  280°C
+2.  34s
+3. 
+4. 
+5.  3  5 
+
+1  
+2.   IC 
+3.    DC-DC  
+4.  VEE 
+5.   10  1   
+6.   
+7.  
+8.  
+
+ YXD-13264C-17F LCM  9. 
+
+1.2
+
+
+ 1.  2. -10°C +35°C  3.  4.  5. /
+
+
+1. , 2. 
+ 3. 
+    LCD  LCD 
+
+1 
+ 
+2 
+
+
+
+YXD-13264C-17F LCM 
+
+1.2
+
+
+
+
+
+
+
+3 
+
+ST7567  YXD-13264C-17F 
+4 .
+
+4.1 
+
+
+
+
+
+
+
+
+
+132*64
+
+Dots
+
+
+
+78.6 (w)*37.9(h)*7.2(t) mm
+
+
+
+54(w)*28(h)
+
+mm
+
+
+
+0.375(w)*0.375(h)
+
+mm
+
+
+
+0.395 (w)*0.395(h)
+
+mm
+
+
+
+1/64 Duty,1/9 Bias
+
+
+
+Positive
+
+LCM  LCD 
+
+COG+FPC+PCB STN, Transmissive
+
+
+
+6 :00
+
+
+
+-30-+70
+
+
+
+-40-+80
+
+
+
+ST7567 or compatible IC
+
+ 4.2 
+
+Green(3.3V max45mA)
+
+37.00±0.20 28.00±0.20 24.29
+
+9.94
+4.57 4.25
+MIC
+-+ 10.70
+
+57.00±0.20 VA 54.00 AA 51.17
+132*64 DOTS
+VIEWING DIRECTION
+
+7.91 8.19 7.00 7.00 7.00
+
+72.60±0.20 78.65±0.20
+
+FFC80mm
+
+3.80
+
+
+
+16
+
+1
+
+P1.0*(16-1)=15.0000
+
+17.00
+
+0.375 0.02
+
+31.50 37.9±0.20
+
+5.50 5.00 1.00
+
+0.375 0.02
+
+
+
+
+8.0±0.5 3.8±0.5
+0.3±0.03
+
+4.3 LCD 
+
+
+
+
+
+
+
+V
+
+
+
+Ton
+
+ 25 25
+
+ 9.2 -
+
+TYP. 9.5 23
+
+ 9.7 400
+
+ V ms
+
+ YXD-13264C-17F LCM 
+
+Toff
+
+
+
+CR
+
+
+
+
+
+
+
+
+
+
+
+
+
+4.4 
+
+25 25 25 25 25 25
+
+1.2
+
+-
+
+239
+
+400
+
+ms
+
+3
+
+7
+
+-
+
+-
+
+88
+
+DEG
+
+DEG
+
+1.2
+
+4.5 ()
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+ YXD-13264C-17F LCM 
+5 
+
+1.2
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+6.
+Pin No. 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16
+7. 
+
+Symbol VDD /RES A0 VS DC DK GND SDA
+LEDA /CS GND VDD
+IR_IN KEY_AD
+GND MIC+ MIC-
+
+Level 3.3V H L,H H/L 3.3V CLOCK
+0V DATA 3.3V
+L 0V 3.3V
+0V
+
+Description Power Supply LCM Reset Signal Input Terminal LCM Data/command Signal Input Terminal Power Supply
+LCM Serial Clock Input Terminal LCM Power Supply Negative Input Terminal
+LCM Serial Data Input Terminal LED Backlight Unit Anode Terminal LCM Selection Signal Input Terminal LCM Power Supply Negative Input Terminal
+Power Supply IR Input
+LCM KEY Signal Terminal LCM Power Supply Negative Input Terminal Microphone+ Microphone-
+
+ YXD-13264C-17F LCM 
+8. 
+
+1.2
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+ YXD-13264C-17F LCM 
+10
+
+1.2
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+ YXD-13264C-17F LCM 
+
+1.2
+
+

@@ -110,14 +110,14 @@ static void svc_adc_thread_entry(void *arg)
         svc_adc_sample_update(adc_dev);
 
         /* 当前重点观察主电、超级电容和锂电的原始值及估算电压。 */
-        APP_NON_CAN_LOG("ADC: BAT24 raw=%lu est=%lumV SUPER5V raw=%lu est=%lumV LI4V2 raw=%lu est=%lumV KEY=%lu\r\n",
-                        g_adc_snapshot.raw_bat24,
-                        g_adc_snapshot.est_bat24_mv,
-                        g_adc_snapshot.raw_super_c,
-                        g_adc_snapshot.est_super_c_mv,
-                        g_adc_snapshot.raw_li_bat,
-                        g_adc_snapshot.est_li_bat_mv,
-                        g_adc_snapshot.raw_key);
+//        APP_NON_CAN_LOG("ADC: BAT24 raw=%lu est=%lumV SUPER5V raw=%lu est=%lumV LI4V2 raw=%lu est=%lumV KEY=%lu\r\n",
+//                        g_adc_snapshot.raw_bat24,
+//                        g_adc_snapshot.est_bat24_mv,
+//                        g_adc_snapshot.raw_super_c,
+//                        g_adc_snapshot.est_super_c_mv,
+//                        g_adc_snapshot.raw_li_bat,
+//                        g_adc_snapshot.est_li_bat_mv,
+//                        g_adc_snapshot.raw_key);
 
         rt_thread_mdelay(APP_ADC_SAMPLE_PERIOD_MS);
     }

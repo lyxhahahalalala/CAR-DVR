@@ -4,27 +4,35 @@
 #include "hpm_gpiom_drv.h"
 #include "hpm_gpiom_soc_drv.h"
 #include "hpm_gpio_drv.h"
+#include "hpm_spi_drv.h"
 #include "app_config.h"
 #include "svc_lcd.h"
 
 /*
  * LCD 相关控制脚，按原理图整理如下：
- * PA03 -> LCD_RSTB
- * PC16 -> LCD_LED_A
- * PA28 -> LCD_CSN
- * PA29 -> LCD_A0
- * PA30 -> LCD_SCK
- * PA31 -> LCD_SDA(MOSI)
+ * PA03 -> LCD_RSTB      硬件复位，低有效
+ * PC16 -> LCD_LED_A     背光阳极，高电平开启
+ * PA28 -> LCD_CSN       SPI 片选，低有效（GPIO 控制）
+ * PA29 -> LCD_A0        命令/数据选择，0=命令，1=数据
+ * PA30 -> LCD_SCK       SPI 时钟（SPI0_SCLK）
+ * PA31 -> LCD_SDA(MOSI) SPI 数据（SPI0_MOSI）
+ *
+ * LCD 驱动芯片：ST7567
+ * 分辨率：132×64 点阵 STN
+ * 接口：4 线 SPI（只写）
+ * VDD：3.3V，背光 3.3V max 45mA
  */
+
+/* ----- GPIO 宏定义 ----- */
 #define LCD_RSTB_GPIO_CTRL      HPM_GPIO0
 #define LCD_RSTB_GPIO_INDEX     GPIO_DO_GPIOA
 #define LCD_RSTB_GPIO_OE        GPIO_OE_GPIOA
 #define LCD_RSTB_PIN            3
 
-#define LCD_BACKLIGHT_GPIO_CTRL HPM_GPIO0
+#define LCD_BACKLIGHT_GPIO_CTRL  HPM_GPIO0
 #define LCD_BACKLIGHT_GPIO_INDEX GPIO_DO_GPIOC
-#define LCD_BACKLIGHT_GPIO_OE   GPIO_OE_GPIOC
-#define LCD_BACKLIGHT_PIN       16
+#define LCD_BACKLIGHT_GPIO_OE    GPIO_OE_GPIOC
+#define LCD_BACKLIGHT_PIN        16
 
 #define LCD_CSN_GPIO_CTRL       HPM_GPIO0
 #define LCD_CSN_GPIO_INDEX      GPIO_DO_GPIOA
@@ -36,37 +44,121 @@
 #define LCD_A0_GPIO_OE          GPIO_OE_GPIOA
 #define LCD_A0_PIN              29
 
+/* ----- ST7567 命令字 ----- */
+#define ST7567_CMD_DISPLAY_OFF      0xAE  /* 关闭显示 */
+#define ST7567_CMD_DISPLAY_ON       0xAF  /* 打开显示 */
+#define ST7567_CMD_SET_START_LINE   0x40  /* 设置起始行（|行号 0~63）*/
+#define ST7567_CMD_SET_PAGE         0xB0  /* 设置页地址（|页号 0~8）*/
+#define ST7567_CMD_SET_COL_HI       0x10  /* 设置列地址高 4 位 */
+#define ST7567_CMD_SET_COL_LO       0x00  /* 设置列地址低 4 位 */
+#define ST7567_CMD_SEG_NORMAL       0xA0  /* SEG 正向扫描（MX=0）*/
+#define ST7567_CMD_SEG_REVERSE      0xA1  /* SEG 反向扫描（MX=1）*/
+#define ST7567_CMD_INVERSE_OFF      0xA6  /* 正常显示（不反色）*/
+#define ST7567_CMD_INVERSE_ON       0xA7  /* 反色显示 */
+#define ST7567_CMD_ALL_PIXEL_OFF    0xA4  /* 正常显示（读 DDRAM）*/
+#define ST7567_CMD_ALL_PIXEL_ON     0xA5  /* 全亮（不读 DDRAM）*/
+#define ST7567_CMD_BIAS_1_9         0xA2  /* LCD Bias = 1/9（1/65 Duty 选此）*/
+#define ST7567_CMD_BIAS_1_7         0xA3  /* LCD Bias = 1/7 */
+#define ST7567_CMD_COM_NORMAL       0xC0  /* COM 正向扫描（MY=0）*/
+#define ST7567_CMD_COM_REVERSE      0xC8  /* COM 反向扫描（MY=1）*/
+#define ST7567_CMD_POWER_CTRL       0x28  /* 电源控制（|VB|VR|VF 3bit）*/
+#define ST7567_CMD_POWER_ALL_ON     0x2F  /* VB=VR=VF=1，全部开启 */
+#define ST7567_CMD_REG_RATIO        0x20  /* 内部电阻比（|RR2:RR0 3bit）*/
+#define ST7567_CMD_SET_EV           0x81  /* 设置对比度（双字节指令）*/
+#define ST7567_CMD_SET_BOOSTER      0xF8  /* 设置升压级数（双字节指令）*/
+#define ST7567_CMD_BOOSTER_X5       0x01  /* 升压 ×5（3.3V 供电选此）*/
+#define ST7567_CMD_SOFTWARE_RESET   0xE2  /* 软件复位 */
+#define ST7567_CMD_NOP              0xE3  /* 空操作 */
+
+/*
+ * 对比度初始值（EV）：0x00~0x3F。
+ * 数值偏大画面偏深，偏小画面偏浅。
+ * 屏幕全白无内容时说明 V0 不够，需提高 EV 或 RR。
+ * 调试顺序：0x1C → 0x28 → 0x30 → 0x38，观察是否出现黑色像素。
+ */
+#define ST7567_INIT_EV              0x38
+/*
+ * 内部电阻比（RR）: 0x00(3.0) ~ 0x07(6.5)，步长 0.5。
+ * 公式：V0 = RR × [(99 + EV) / 162] × 2.1
+ * 以 RR=6.5, EV=0x38=56: V0 = 6.5 × [(99+56)/162] × 2.1 ≈ 13.1V
+ * 若画面过深（全黑），改回 0x06 或降低 EV。
+ */
+#define ST7567_INIT_REG_RATIO       0x07  /* 对应命令 0x20|0x07 = 0x27，RR=6.5 */
+
+/* LCD 有效列宽 */
+#define LCD_COLS    132
+/* LCD 有效页数（每页 8 行，共 64 行 = 8 页；icon 行作为第 8 页不使用）*/
+#define LCD_PAGES   8
+
+/* ----- SPI 初始化 ----- */
+static void svc_lcd_spi_hw_init(void)
+{
+    uint32_t spi_clk_hz;
+    spi_timing_config_t timing_cfg;
+    spi_format_config_t format_cfg;
+
+    /* 使能 SPI0 时钟（board.c 中已添加 SPI0 分支，时钟源 24MHz/12 = 2MHz）*/
+    spi_clk_hz = board_init_spi_clock(HPM_SPI0);
+    if (spi_clk_hz == 0) {
+        /* 备用：直接用 clock_spi0 时钟频率估算 */
+        spi_clk_hz = 2000000UL;
+    }
+
+    /* 时序配置：SPI 波特率 1MHz（2MHz / 2 = 1MHz，div_integer=2 为偶数，满足要求）*/
+    spi_master_get_default_timing_config(&timing_cfg);
+    timing_cfg.master_config.clk_src_freq_in_hz = spi_clk_hz;
+    timing_cfg.master_config.sclk_freq_in_hz    = 1000000UL;
+    spi_master_timing_init(HPM_SPI0, &timing_cfg);
+
+    /* 格式配置：主机模式，8 位，MSB first，Mode 3（CPOL=1，CPHA=1）
+     * ST7567 在 SCK 上升沿采样数据，Mode 0 / Mode 3 均兼容。
+     * HPM 默认即为 Mode 3（spi_sclk_high_idle + spi_sclk_sampling_even_clk_edges）。
+     */
+    spi_master_get_default_format_config(&format_cfg);
+    format_cfg.common_config.data_len_in_bits = 8;
+    format_cfg.common_config.lsb              = false;   /* MSB first */
+    format_cfg.common_config.mode             = spi_master_mode;
+    /* 保持默认 CPOL=1 / CPHA=1（Mode 3），与 ST7567 兼容 */
+    spi_format_init(HPM_SPI0, &format_cfg);
+}
+
+/* ----- GPIO 初始化 ----- */
 static void svc_lcd_ctrl_pins_init(void)
 {
-    /* SPI 时钟和数据走 SPI0，只把 CS/A0 当作 GPIO 控制。 */
+    /*
+     * SPI0 引脚：PA30 → SCK，PA31 → MOSI；
+     * CS（PA28）和 A0（PA29）用 GPIO 软件控制。
+     */
     board_init_spi_pins_with_gpio_as_cs(HPM_SPI0);
 
-    /* LCD_RSTB */
+    /* LCD_RSTB（PA03）*/
     HPM_IOC->PAD[IOC_PAD_PA03].FUNC_CTL = IOC_PA03_FUNC_CTL_GPIO_A_03;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_RSTB_PIN, gpiom_soc_gpio0);
     gpio_set_pin_output(LCD_RSTB_GPIO_CTRL, LCD_RSTB_GPIO_OE, LCD_RSTB_PIN);
 
-    /* LCD_LED_A */
+    /* LCD_LED_A（PC16）*/
     HPM_IOC->PAD[IOC_PAD_PC16].FUNC_CTL = IOC_PC16_FUNC_CTL_GPIO_C_16;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, LCD_BACKLIGHT_PIN, gpiom_soc_gpio0);
     gpio_set_pin_output(LCD_BACKLIGHT_GPIO_CTRL, LCD_BACKLIGHT_GPIO_OE, LCD_BACKLIGHT_PIN);
 
-    /* LCD_CSN */
+    /* LCD_CSN（PA28）*/
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_CSN_PIN, gpiom_soc_gpio0);
     gpio_set_pin_output(LCD_CSN_GPIO_CTRL, LCD_CSN_GPIO_OE, LCD_CSN_PIN);
 
-    /* LCD_A0 */
+    /* LCD_A0（PA29）*/
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_A0_PIN, gpiom_soc_gpio0);
     gpio_set_pin_output(LCD_A0_GPIO_CTRL, LCD_A0_GPIO_OE, LCD_A0_PIN);
 }
 
+/* ----- GPIO 控制函数 ----- */
 void lcd_reset(void)
 {
-    /* 先给一个最小骨架：拉低一段时间后再拉高。 */
+    /* RSTB 低脉冲：低 ≥ 1μs（3.3V），实际给 20ms 裕量大 */
     gpio_write_pin(LCD_RSTB_GPIO_CTRL, LCD_RSTB_GPIO_INDEX, LCD_RSTB_PIN, 0);
     rt_thread_mdelay(20);
     gpio_write_pin(LCD_RSTB_GPIO_CTRL, LCD_RSTB_GPIO_INDEX, LCD_RSTB_PIN, 1);
-    rt_thread_mdelay(120);
+    /* 复位完成后等待内部初始化 */
+    rt_thread_mdelay(5);
 }
 
 void lcd_backlight_on(void)
@@ -81,38 +173,215 @@ void lcd_backlight_off(void)
 
 void lcd_a0_set(rt_bool_t is_data)
 {
+    /* is_data=RT_TRUE  → A0=1 → 数据模式
+     * is_data=RT_FALSE → A0=0 → 命令模式 */
     gpio_write_pin(LCD_A0_GPIO_CTRL, LCD_A0_GPIO_INDEX, LCD_A0_PIN, is_data ? 1 : 0);
 }
 
 void lcd_csn_set(rt_bool_t active)
 {
-    /* 片选通常低有效：active=1 时拉低，active=0 时释放为高。 */
+    /* 片选低有效：active=RT_TRUE 拉低，active=RT_FALSE 释放为高 */
     gpio_write_pin(LCD_CSN_GPIO_CTRL, LCD_CSN_GPIO_INDEX, LCD_CSN_PIN, active ? 0 : 1);
 }
 
+/* ----- SPI 字节写 ----- */
+static void lcd_spi_write_byte(uint8_t byte)
+{
+    hpm_stat_t stat;
+    spi_control_config_t ctrl_cfg;
+    spi_master_get_default_control_config(&ctrl_cfg);
+    ctrl_cfg.common_config.trans_mode = spi_trans_write_only;
+
+    stat = spi_transfer(HPM_SPI0, &ctrl_cfg, NULL, NULL, &byte, 1, NULL, 0);
+    if (stat != status_success) {
+        APP_NON_CAN_LOG("SPI err: 0x%x byte=0x%02x\r\n", (unsigned)stat, byte);
+    }
+    spi_wait_for_idle_status(HPM_SPI0);
+}
+
+/* ----- 命令 / 数据写 ----- */
+static void lcd_write_cmd(uint8_t cmd)
+{
+    lcd_csn_set(RT_TRUE);
+    lcd_a0_set(RT_FALSE);   /* A0=0 → 命令 */
+    lcd_spi_write_byte(cmd);
+    lcd_csn_set(RT_FALSE);
+}
+
+static void lcd_write_data(uint8_t dat)
+{
+    lcd_csn_set(RT_TRUE);
+    lcd_a0_set(RT_TRUE);    /* A0=1 → 数据 */
+    lcd_spi_write_byte(dat);
+    lcd_csn_set(RT_FALSE);
+}
+
+/* ----- 批量写数据（同一页连续列）----- */
+static void lcd_write_data_buf(const uint8_t *buf, uint16_t len)
+{
+    spi_control_config_t ctrl_cfg;
+    spi_master_get_default_control_config(&ctrl_cfg);
+    ctrl_cfg.common_config.trans_mode = spi_trans_write_only;
+
+    lcd_csn_set(RT_TRUE);
+    lcd_a0_set(RT_TRUE);    /* A0=1 → 数据 */
+
+    /* 分批发送（spi_transfer 每次最多 512 字节，实际这里最多 132 字节，够用）*/
+    spi_transfer(HPM_SPI0, &ctrl_cfg, NULL, NULL, (uint8_t *)buf, (uint32_t)len, NULL, 0);
+    spi_wait_for_idle_status(HPM_SPI0);
+
+    lcd_csn_set(RT_FALSE);
+}
+
+/* ----- 定位到指定页和列 ----- */
+static void lcd_set_page_col(uint8_t page, uint8_t col)
+{
+    lcd_write_cmd(ST7567_CMD_SET_PAGE | (page & 0x0F));
+    lcd_write_cmd(ST7567_CMD_SET_COL_HI | ((col >> 4) & 0x0F));
+    lcd_write_cmd(ST7567_CMD_SET_COL_LO | (col & 0x0F));
+}
+
+/* ----- 清屏（DDRAM 全写 0x00）----- */
+void lcd_clear(void)
+{
+    static const uint8_t zeros[LCD_COLS] = {0};
+    for (uint8_t page = 0; page < LCD_PAGES; page++) {
+        lcd_set_page_col(page, 0);
+        lcd_write_data_buf(zeros, LCD_COLS);
+    }
+}
+
+/* ----- 全亮测试（DDRAM 全写 0xFF）----- */
+void lcd_fill_all(void)
+{
+    static uint8_t ones[LCD_COLS];
+    for (uint8_t i = 0; i < LCD_COLS; i++) {
+        ones[i] = 0xFF;
+    }
+    for (uint8_t page = 0; page < LCD_PAGES; page++) {
+        lcd_set_page_col(page, 0);
+        lcd_write_data_buf(ones, LCD_COLS);
+    }
+}
+
+/* ----- ST7567 初始化序列 ----- */
+static void st7567_init_seq(void)
+{
+    /* 上电后等待电源稳定，然后硬件复位 */
+    rt_thread_mdelay(10);
+    lcd_reset();
+
+    /*
+     * 规格书第 10 节：从复位释放到 Power Control 命令，必须在 5ms 内完成。
+     * 以下命令组顺序严格按规格书 Power ON 流程。
+     */
+
+    /* 1. Bias = 1/9（对应 1/65 Duty）*/
+    lcd_write_cmd(ST7567_CMD_BIAS_1_9);
+
+    /* 2. SEG 方向：正向（视显示画面是否需要水平镜像，可改为 ST7567_CMD_SEG_REVERSE）*/
+    lcd_write_cmd(ST7567_CMD_SEG_NORMAL);
+
+    /* 3. COM 方向：反向（视显示画面是否需要垂直翻转，可改为 ST7567_CMD_COM_NORMAL）*/
+    lcd_write_cmd(ST7567_CMD_COM_REVERSE);
+
+    /* 4. 起始行 = 0 */
+    lcd_write_cmd(ST7567_CMD_SET_START_LINE | 0x00);
+
+    /* 5. 内部电阻比：RR = 6.0 */
+    lcd_write_cmd(ST7567_CMD_REG_RATIO | ST7567_INIT_REG_RATIO);
+
+    /* 6. 电子音量（对比度），双字节指令 */
+    lcd_write_cmd(ST7567_CMD_SET_EV);
+    lcd_write_cmd(ST7567_INIT_EV);
+
+    /* 7. 升压比，双字节指令：×5（适用于 3.3V 供电）*/
+    lcd_write_cmd(ST7567_CMD_SET_BOOSTER);
+    lcd_write_cmd(ST7567_CMD_BOOSTER_X5);
+
+    /* 8. 电源控制：Booster + Regulator + Follower 全开 */
+    lcd_write_cmd(ST7567_CMD_POWER_ALL_ON);
+
+    /*
+     * 等待内部升压电路稳定。
+     * 规格书建议：Booster/Regulator/Follower 各需最多 100ms。
+     * 实际 3.3V + X5 升压，等 120ms 足够。
+     */
+    rt_thread_mdelay(120);
+
+    /* 9. 正常显示，不反色 */
+    lcd_write_cmd(ST7567_CMD_INVERSE_OFF);
+
+    /*
+     * ★ 诊断测试：发送 0xA5（ALL_PIXEL_ON）——全部像素强制点亮，不读 DDRAM。
+     *   若屏幕此时变黑/深色，说明 SPI 命令已被 ST7567 接收，驱动芯片和对比度均正常。
+     *   若屏幕仍然全白：检查 LCD 模块 VDD（FPC Pin1/5/12）是否有 3.3V。
+     *   确认正常后，将此行改回 ST7567_CMD_ALL_PIXEL_OFF（0xA4）。
+     */
+    lcd_write_cmd(ST7567_CMD_ALL_PIXEL_ON);   /* 0xA5：全亮（忽略 DDRAM）*/
+
+    /* 10. 清 DDRAM */
+    lcd_clear();
+
+    /* 11. 打开显示 */
+    lcd_write_cmd(ST7567_CMD_DISPLAY_ON);
+}
+
+/* ----- svc_lcd_init：外部调用入口 ----- */
+int svc_lcd_init(void)
+{
+    /* 1. GPIO / SPI 引脚配置 */
+    svc_lcd_ctrl_pins_init();
+
+    /* 2. SPI0 硬件初始化 */
+    svc_lcd_spi_hw_init();
+
+    /* 3. 初始电平：CS 无效（高）、A0=数据、背光关 */
+    lcd_csn_set(RT_FALSE);
+    lcd_a0_set(RT_TRUE);
+    lcd_backlight_off();
+
+    /* 4. ST7567 初始化序列 */
+    st7567_init_seq();
+
+    APP_NON_CAN_LOG("LCD ST7567 init done\r\n");
+    return RT_EOK;
+}
+
+/* ----- LCD 任务线程 ----- */
 static void svc_lcd_thread_entry(void *arg)
 {
     RT_UNUSED(arg);
 
+    /*
+     * Bring-up 验证步骤：
+     * 1. 先全亮（所有像素点亮），确认背光 + SPI + 驱动时序 OK
+     * 2. 打开背光
+     * 3. 延时后清屏，观察画面变化，确认刷屏流程正常
+     * 如果上述两步均正常，后续可接入字库 / 图形接口。
+     */
+
+    /* 步骤 1：全亮验证 */
+    lcd_fill_all();
+    lcd_backlight_on();
+    APP_NON_CAN_LOG("LCD: full-on test (backlight ON, all pixels ON)\r\n");
+
+    rt_thread_mdelay(3000);
+
+    /* 步骤 2：清屏，观察像素切换 */
+    lcd_clear();
+    APP_NON_CAN_LOG("LCD: cleared\r\n");
+
+    rt_thread_mdelay(2000);
+
+    /* 步骤 3：循环交替全亮/清屏，方便示波器抓波形 */
     while (1)
     {
-        /* 当前阶段先验证线程已经启动，后续再补 LCD 时序和刷屏逻辑。 */
-        APP_NON_CAN_LOG("555\r\n");
+        lcd_fill_all();
+        rt_thread_mdelay(APP_LCD_TASK_PERIOD_MS);
+        lcd_clear();
         rt_thread_mdelay(APP_LCD_TASK_PERIOD_MS);
     }
-}
-
-int svc_lcd_init(void)
-{
-    /* 先把 LCD 相关控制脚和默认电平准备好。 */
-    svc_lcd_ctrl_pins_init();
-
-    lcd_csn_set(RT_FALSE);
-    lcd_a0_set(RT_TRUE);
-    lcd_backlight_off();
-    lcd_reset();
-
-    return RT_EOK;
 }
 
 int svc_lcd_task_start(void)
