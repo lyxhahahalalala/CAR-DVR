@@ -101,11 +101,35 @@
 
 static uint8_t g_lcd_fb[LCD_PAGES][LCD_COLS];
 
-static const uint16_t g_cn_label_rows[12] = {
-    0xD2E0, 0xD2A4, 0xF7E4, 0x92A4,
-    0xFBE4, 0x92A4, 0xD2E4, 0x12A4,
-    0xF7E4, 0x9224, 0x93E4, 0xF224
+static const uint8_t g_cn_lian[32] = {
+    0x00,0x02,0x04,0x02,0xe8,0x7f,0x08,0x01,
+    0x00,0x05,0x80,0x04,0xcf,0x3f,0x08,0x04,
+    0x08,0x04,0x08,0x04,0xe8,0x7f,0x08,0x04,
+    0x08,0x04,0x14,0x04,0xe2,0x7f,0x00,0x00,
 };
+
+static const uint8_t g_cn_xu[32] = {
+    0x08,0x04,0x08,0x04,0x84,0x3f,0x24,0x04,
+    0x22,0x04,0xdf,0x7f,0x08,0x40,0x04,0x29,
+    0x02,0x0a,0xbf,0x08,0x02,0x09,0xc0,0x7f,
+    0x38,0x14,0x07,0x22,0x02,0x41,0xc0,0x40,
+};
+
+static const uint8_t g_cn_jia[32] = {
+    0x10,0x00,0x10,0x00,0xfe,0x3e,0x88,0x22,
+    0x88,0x22,0xa4,0x3e,0x42,0x00,0xf8,0x07,
+    0x00,0x04,0x10,0x04,0x10,0x04,0xf0,0x3f,
+    0x00,0x20,0xfe,0x23,0x00,0x28,0x00,0x10,
+};
+
+static const uint8_t g_cn_shi[32] = {
+    0x00,0x04,0x1f,0x04,0x10,0x04,0x92,0x3f,
+    0x92,0x24,0x92,0x24,0x92,0x24,0xbe,0x24,
+    0xa0,0x3f,0x20,0x04,0x38,0x05,0x27,0x06,
+    0x22,0x06,0x20,0x09,0x94,0x10,0x48,0x60,
+};
+
+
 
 static const uint8_t *lcd_font5x7_get(char ch)
 {
@@ -323,21 +347,16 @@ static void lcd_fb_set_pixel(uint8_t x, uint8_t y, rt_bool_t on)
         return;
     }
 
-    /*
-     *
-     *
-     * 当前面板需要翻转页顺序，但页内 bit 顺序保持不变。
-     * 这样可以把第一行移回顶部，同时避免字形上下镜像。
-     */
     page = (uint8_t)(y / 8U);
-    //bit = y % 8U;
     bit = 7U - (y % 8U);
+
     if (on) {
         g_lcd_fb[page][x] |= (uint8_t)(1U << bit);
     } else {
         g_lcd_fb[page][x] &= (uint8_t)~(1U << bit);
     }
 }
+
 
 static void lcd_fb_hline(uint8_t x, uint8_t y, uint8_t len)
 {
@@ -437,17 +456,54 @@ static void lcd_fb_draw_string5x7_scaled_right(uint8_t right_x, uint8_t y, const
     }
 }
 
-static void lcd_fb_draw_cn_label(uint8_t x, uint8_t y)
+//static void lcd_fb_draw_cn_char16x16(uint8_t x, uint8_t y, const uint8_t glyph[32])
+//{
+//    for (uint8_t row = 0; row < 16; row++) {
+//        uint16_t bits = (uint16_t)glyph[row * 2]
+//                      | ((uint16_t)glyph[row * 2 + 1] << 8);
+//        uint8_t draw_y = (uint8_t)(y + (row & 0xF8U) + (7U - (row & 0x07U)));
+//
+//        for (uint8_t col = 0; col < 16; col++) {
+//            if (bits & (uint16_t)(1U << col)) {
+//                lcd_fb_set_pixel((uint8_t)(x + col), draw_y, RT_TRUE);
+//            }
+//        }
+//    }
+//}
+
+
+static void lcd_fb_draw_cn_char16x16(uint8_t x, uint8_t y, const uint8_t glyph[32])
 {
-    for (uint8_t row = 0; row < 12; row++) {
-        uint16_t bits = g_cn_label_rows[row];
+    for (uint8_t row = 0; row < 16; row++) {
+        uint8_t src_row = (uint8_t)(15U - row);
+        uint16_t bits = (uint16_t)glyph[src_row * 2]
+                      | ((uint16_t)glyph[src_row * 2 + 1] << 8);
+        uint8_t draw_y = (uint8_t)(y + (row & 0xF8U) + (7U - (row & 0x07U)));
+
         for (uint8_t col = 0; col < 16; col++) {
-            if (bits & (uint16_t)(1U << (15U - col))) {
-                lcd_fb_set_pixel((uint8_t)(x + col), (uint8_t)(y + row), RT_TRUE);
+            if (bits & (uint16_t)(1U << col)) {
+                lcd_fb_set_pixel((uint8_t)(x + col), draw_y, RT_TRUE);
             }
         }
     }
 }
+
+
+
+
+
+
+
+
+static void lcd_fb_draw_cn_string_lxjs(uint8_t x, uint8_t y)
+{
+    lcd_fb_draw_cn_char16x16(x, y, g_cn_lian);
+    lcd_fb_draw_cn_char16x16((uint8_t)(x + 16), y, g_cn_xu);
+    lcd_fb_draw_cn_char16x16((uint8_t)(x + 32), y, g_cn_jia);
+    lcd_fb_draw_cn_char16x16((uint8_t)(x + 48), y, g_cn_shi);
+}
+
+
 
 static void lcd_fb_draw_signal_icon(uint8_t x, uint8_t y)
 {
@@ -503,47 +559,27 @@ static void lcd_render_home_ui(void)
 
     lcd_fb_clear();
 
-//    /* 第1行：状态图标 */
-//    lcd_fb_draw_signal_icon(safe_left, status_y);
-//    lcd_fb_draw_g_box((uint8_t)(safe_left + 16), status_y);
-//    lcd_fb_draw_status_icon((uint8_t)(safe_left + 32), status_y);
-//    lcd_fb_draw_string5x7((uint8_t)(safe_left + 42), (uint8_t)(status_y + 1), "05");
-//
-//    /* 第2行：左侧车速，右侧时间 */
-//    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), row1_y, "0 km/h");
-//    lcd_fb_draw_string5x7_scaled_right(safe_right, row1_y, "09:16:45", 1);
-//
-//    /* 第3行：先用已有字模代替“连续驾驶” */
-//    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), row2_y, "G 00");
-//    lcd_fb_draw_string5x7_scaled_right(safe_right, row2_y, "00:00:00", 1);
-//
-//    /* 第4行：方块 + 编号 */
-//    lcd_fb_fill_rect((uint8_t)(safe_left + 1), (uint8_t)(row3_y + 1), 6, 6);
-//    lcd_fb_draw_string5x7((uint8_t)(safe_left + 10), row3_y, "800000000000255304");
-
-    /* 第1行：故意放原第2行内容 */
+    /* 第1行位置显示原第2行内容 */
     lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), status_y, "0 km/h");
     lcd_fb_draw_string5x7_scaled_right(safe_right, status_y, "09:16:45", 1);
 
-    /* 第2行：故意放原第1行内容 */
+    /* 第2行位置显示原第1行内容 */
     lcd_fb_draw_signal_icon(safe_left, row1_y);
     lcd_fb_draw_g_box((uint8_t)(safe_left + 16), row1_y);
     lcd_fb_draw_status_icon((uint8_t)(safe_left + 32), row1_y);
     lcd_fb_draw_string5x7((uint8_t)(safe_left + 42), (uint8_t)(row1_y + 1), "05");
 
-    /* 第3行：故意放原第4行内容 */
+    /* 第3行位置显示原第4行内容 */
     lcd_fb_fill_rect((uint8_t)(safe_left + 1), (uint8_t)(row2_y + 1), 6, 6);
     lcd_fb_draw_string5x7((uint8_t)(safe_left + 10), row2_y, "800000000000255304");
 
-    /* 第4行：故意放原第3行内容 */
-    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), row3_y, "G 00");
-    lcd_fb_draw_string5x7_scaled_right(safe_right, row3_y, "00:00:00", 1);
-
-
-
+    /* 第4行位置显示原第3行内容 */
+    lcd_fb_draw_cn_string_lxjs((uint8_t)(safe_left + 2), row3_y);
+    lcd_fb_draw_string5x7_scaled_right((uint8_t)(safe_right - 2), row3_y, "00:00:00", 1);
 
     lcd_fb_flush();
 }
+
 
 
 
