@@ -6,25 +6,18 @@
 #include "hpm_gpio_drv.h"
 #include "hpm_spi_drv.h"
 #include "app_config.h"
-#include "svc_adc.h"
 #include "svc_lcd.h"
 
 /*
- * LCD 相关控制脚，按原理图整理如下：
+ * LCD 相关控制脚，按当前已打通的连线整理如下：
  * PA03 -> LCD_RSTB      硬件复位，低有效
  * PC16 -> LCD_LED_A     背光阳极，高电平开启
  * PA28 -> LCD_CSN       SPI 片选，低有效（GPIO 控制）
  * PA29 -> LCD_A0        命令/数据选择，0=命令，1=数据
- * PA30 -> LCD_SCK       SPI 时钟（SPI0_SCLK）
- * PA31 -> LCD_SDA(MOSI) SPI 数据（SPI0_MOSI）
- *
- * LCD 驱动芯片：ST7567
- * 分辨率：132×64 点阵 STN
- * 接口：4 线 SPI（只写）
- * VDD：3.3V，背光 3.3V max 45mA
+ * PA30 -> LCD_SCK       SPI 时钟
+ * PA31 -> LCD_SDA       SPI 数据
  */
 
-/* ----- GPIO 宏定义 ----- */
 #define LCD_RSTB_GPIO_CTRL      HPM_GPIO0
 #define LCD_RSTB_GPIO_INDEX     GPIO_DO_GPIOA
 #define LCD_RSTB_GPIO_OE        GPIO_OE_GPIOA
@@ -74,68 +67,88 @@
 #define LCD_DAT_PIN             LCD_SDA_PIN
 #endif
 
-/* ----- ST7567 命令字 ----- */
-#define ST7567_CMD_DISPLAY_OFF      0xAE  /* 关闭显示 */
-#define ST7567_CMD_DISPLAY_ON       0xAF  /* 打开显示 */
-#define ST7567_CMD_SET_START_LINE   0x40  /* 设置起始行（|行号 0~63）*/
-#define ST7567_CMD_SET_PAGE         0xB0  /* 设置页地址（|页号 0~8）*/
-#define ST7567_CMD_SET_COL_HI       0x10  /* 设置列地址高 4 位 */
-#define ST7567_CMD_SET_COL_LO       0x00  /* 设置列地址低 4 位 */
-#define ST7567_CMD_SEG_NORMAL       0xA0  /* SEG 正向扫描（MX=0）*/
-#define ST7567_CMD_SEG_REVERSE      0xA1  /* SEG 反向扫描（MX=1）*/
-#define ST7567_CMD_INVERSE_OFF      0xA6  /* 正常显示（不反色）*/
-#define ST7567_CMD_INVERSE_ON       0xA7  /* 反色显示 */
-#define ST7567_CMD_ALL_PIXEL_OFF    0xA4  /* 正常显示（读 DDRAM）*/
-#define ST7567_CMD_ALL_PIXEL_ON     0xA5  /* 全亮（不读 DDRAM）*/
-#define ST7567_CMD_BIAS_1_9         0xA2  /* LCD Bias = 1/9（1/65 Duty 选此）*/
-#define ST7567_CMD_BIAS_1_7         0xA3  /* LCD Bias = 1/7 */
-#define ST7567_CMD_COM_NORMAL       0xC0  /* COM 正向扫描（MY=0）*/
-#define ST7567_CMD_COM_REVERSE      0xC8  /* COM 反向扫描（MY=1）*/
-#define ST7567_CMD_POWER_CTRL       0x28  /* 电源控制（|VB|VR|VF 3bit）*/
-#define ST7567_CMD_POWER_ALL_ON     0x2F  /* VB=VR=VF=1，全部开启 */
-#define ST7567_CMD_REG_RATIO        0x20  /* 内部电阻比（|RR2:RR0 3bit）*/
-#define ST7567_CMD_SET_EV           0x81  /* 设置对比度（双字节指令）*/
-#define ST7567_CMD_SET_BOOSTER      0xF8  /* 设置升压级数（双字节指令）*/
-#define ST7567_CMD_BOOSTER_X5       0x01  /* 升压 ×5（3.3V 供电选此）*/
-#define ST7567_CMD_SOFTWARE_RESET   0xE2  /* 软件复位 */
-#define ST7567_CMD_NOP              0xE3  /* 空操作 */
+#define ST7567_CMD_DISPLAY_ON       0xAF
+#define ST7567_CMD_SET_START_LINE   0x40
+#define ST7567_CMD_SET_PAGE         0xB0
+#define ST7567_CMD_SET_COL_HI       0x10
+#define ST7567_CMD_SET_COL_LO       0x00
+#define ST7567_CMD_SEG_NORMAL       0xA0
+#define ST7567_CMD_SEG_REVERSE      0xA1
+#define ST7567_CMD_INVERSE_OFF      0xA6
+#define ST7567_CMD_ALL_PIXEL_OFF    0xA4
+#define ST7567_CMD_BIAS_1_9         0xA2
+#define ST7567_CMD_COM_REVERSE      0xC8
+#define ST7567_CMD_POWER_ALL_ON     0x2F
+#define ST7567_CMD_REG_RATIO        0x20
+#define ST7567_CMD_SET_EV           0x81
+#define ST7567_CMD_SET_BOOSTER      0xF8
+#define ST7567_CMD_BOOSTER_X5       0x01
+#define ST7567_CMD_COM_NORMAL       0xC0
 
-/*
- * 对比度初始值（EV）：0x00~0x3F。
- * 数值偏大画面偏深，偏小画面偏浅。
- * 屏幕全白无内容时说明 V0 不够，需提高 EV 或 RR。
- * 调试顺序：0x1C → 0x28 → 0x30 → 0x38，观察是否出现黑色像素。
- */
+
 #define ST7567_INIT_EV              0x28
-/*
- * 内部电阻比（RR）: 0x00(3.0) ~ 0x07(6.5)，步长 0.5。
- * 公式：V0 = RR × [(99 + EV) / 162] × 2.1
- * 以 RR=6.5, EV=0x38=56: V0 = 6.5 × [(99+56)/162] × 2.1 ≈ 13.1V
- * 若画面过深（全黑），改回 0x06 或降低 EV。
- */
-#define ST7567_INIT_REG_RATIO       0x07  /* 对应命令 0x20|0x07 = 0x27，RR=6.5 */
+#define ST7567_INIT_REG_RATIO       0x07
 
-/* LCD 有效列宽 */
-#define LCD_COLS    132
-/* LCD 有效页数（每页 8 行，共 64 行 = 8 页；icon 行作为第 8 页不使用）*/
-#define LCD_PAGES   8
+#define LCD_COLS                    132
+#define LCD_PAGES                   8
+#define LCD_ROWS                    64
 
-/*
- * 按键分压测试阈值，按原理图标称电压的相邻中点划分：
- * S1 = 0V
- * S2 = 0.807V
- * S3 = 2.142V
- * S4 = 2.773V
- * 无按键 = 3.3V
- */
-#define LCD_KEY_S1_MAX_MV           400U
-#define LCD_KEY_S2_MAX_MV           1475U
-#define LCD_KEY_S3_MAX_MV           2300U
-#define LCD_KEY_S4_MAX_MV           2900U
+#define LCD_UI_MARGIN_LEFT          6
+#define LCD_UI_MARGIN_RIGHT         6
+#define LCD_UI_MARGIN_TOP           4
+#define LCD_UI_MARGIN_BOTTOM        4
+#define LCD_HW_COL_OFFSET           0//4
 
 static uint8_t g_lcd_fb[LCD_PAGES][LCD_COLS];
 
-/* ----- 软件 SPI 初始化 ----- */
+static const uint16_t g_cn_label_rows[12] = {
+    0xD2E0, 0xD2A4, 0xF7E4, 0x92A4,
+    0xFBE4, 0x92A4, 0xD2E4, 0x12A4,
+    0xF7E4, 0x9224, 0x93E4, 0xF224
+};
+
+static const uint8_t *lcd_font5x7_get(char ch)
+{
+    static const uint8_t font_space[5] = {0x00, 0x00, 0x00, 0x00, 0x00};
+    static const uint8_t font_slash[5] = {0x20, 0x10, 0x08, 0x04, 0x02};
+    static const uint8_t font_colon[5] = {0x00, 0x36, 0x36, 0x00, 0x00};
+    static const uint8_t font_0[5] = {0x3E, 0x51, 0x49, 0x45, 0x3E};
+    static const uint8_t font_1[5] = {0x00, 0x42, 0x7F, 0x40, 0x00};
+    static const uint8_t font_2[5] = {0x42, 0x61, 0x51, 0x49, 0x46};
+    static const uint8_t font_3[5] = {0x21, 0x41, 0x45, 0x4B, 0x31};
+    static const uint8_t font_4[5] = {0x18, 0x14, 0x12, 0x7F, 0x10};
+    static const uint8_t font_5[5] = {0x27, 0x45, 0x45, 0x45, 0x39};
+    static const uint8_t font_6[5] = {0x3C, 0x4A, 0x49, 0x49, 0x30};
+    static const uint8_t font_7[5] = {0x01, 0x71, 0x09, 0x05, 0x03};
+    static const uint8_t font_8[5] = {0x36, 0x49, 0x49, 0x49, 0x36};
+    static const uint8_t font_9[5] = {0x06, 0x49, 0x49, 0x29, 0x1E};
+    static const uint8_t font_G[5] = {0x3E, 0x41, 0x49, 0x49, 0x7A};
+    static const uint8_t font_k[5] = {0x7F, 0x10, 0x28, 0x44, 0x00};
+    static const uint8_t font_m[5] = {0x7C, 0x04, 0x18, 0x04, 0x78};
+    static const uint8_t font_h[5] = {0x7F, 0x08, 0x04, 0x04, 0x78};
+
+    switch (ch) {
+    case '0': return font_0;
+    case '1': return font_1;
+    case '2': return font_2;
+    case '3': return font_3;
+    case '4': return font_4;
+    case '5': return font_5;
+    case '6': return font_6;
+    case '7': return font_7;
+    case '8': return font_8;
+    case '9': return font_9;
+    case ':': return font_colon;
+    case '/': return font_slash;
+    case 'G': return font_G;
+    case 'k': return font_k;
+    case 'm': return font_m;
+    case 'h': return font_h;
+    case ' ': return font_space;
+    default:  return font_space;
+    }
+}
+
 static void svc_lcd_spi_hw_init(void)
 {
     HPM_IOC->PAD[IOC_PAD_PA30].FUNC_CTL = IOC_PA30_FUNC_CTL_GPIO_A_30;
@@ -154,25 +167,20 @@ static void svc_lcd_spi_hw_init(void)
     gpio_write_pin(LCD_DAT_GPIO_CTRL, LCD_DAT_GPIO_INDEX, LCD_DAT_PIN, 0);
 }
 
-/* ----- GPIO 初始化 ----- */
 static void svc_lcd_ctrl_pins_init(void)
 {
-    /* LCD_RSTB（PA03）*/
     HPM_IOC->PAD[IOC_PAD_PA03].FUNC_CTL = IOC_PA03_FUNC_CTL_GPIO_A_03;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_RSTB_PIN, gpiom_soc_gpio0);
     gpio_set_pin_output(LCD_RSTB_GPIO_CTRL, LCD_RSTB_GPIO_OE, LCD_RSTB_PIN);
 
-    /* LCD_LED_A（PC16）*/
     HPM_IOC->PAD[IOC_PAD_PC16].FUNC_CTL = IOC_PC16_FUNC_CTL_GPIO_C_16;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, LCD_BACKLIGHT_PIN, gpiom_soc_gpio0);
     gpio_set_pin_output(LCD_BACKLIGHT_GPIO_CTRL, LCD_BACKLIGHT_GPIO_OE, LCD_BACKLIGHT_PIN);
 
-    /* LCD_CSN（PA28）*/
     HPM_IOC->PAD[IOC_PAD_PA28].FUNC_CTL = IOC_PA28_FUNC_CTL_GPIO_A_28;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_CSN_PIN, gpiom_soc_gpio0);
     gpio_set_pin_output(LCD_CSN_GPIO_CTRL, LCD_CSN_GPIO_OE, LCD_CSN_PIN);
 
-    /* LCD_A0（PA29）*/
     HPM_IOC->PAD[IOC_PAD_PA29].FUNC_CTL = IOC_PA29_FUNC_CTL_GPIO_A_29;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_A0_PIN, gpiom_soc_gpio0);
     gpio_set_pin_output(LCD_A0_GPIO_CTRL, LCD_A0_GPIO_OE, LCD_A0_PIN);
@@ -193,14 +201,11 @@ static void lcd_sda_set(rt_bool_t high)
     gpio_write_pin(LCD_DAT_GPIO_CTRL, LCD_DAT_GPIO_INDEX, LCD_DAT_PIN, high ? 1 : 0);
 }
 
-/* ----- GPIO 控制函数 ----- */
 void lcd_reset(void)
 {
-    /* RSTB 低脉冲：低 ≥ 1μs（3.3V），实际给 20ms 裕量大 */
     gpio_write_pin(LCD_RSTB_GPIO_CTRL, LCD_RSTB_GPIO_INDEX, LCD_RSTB_PIN, 0);
     rt_thread_mdelay(20);
     gpio_write_pin(LCD_RSTB_GPIO_CTRL, LCD_RSTB_GPIO_INDEX, LCD_RSTB_PIN, 1);
-    /* 复位完成后等待内部初始化 */
     rt_thread_mdelay(5);
 }
 
@@ -216,18 +221,14 @@ void lcd_backlight_off(void)
 
 void lcd_a0_set(rt_bool_t is_data)
 {
-    /* is_data=RT_TRUE  → A0=1 → 数据模式
-     * is_data=RT_FALSE → A0=0 → 命令模式 */
     gpio_write_pin(LCD_A0_GPIO_CTRL, LCD_A0_GPIO_INDEX, LCD_A0_PIN, is_data ? 1 : 0);
 }
 
 void lcd_csn_set(rt_bool_t active)
 {
-    /* 片选低有效：active=RT_TRUE 拉低，active=RT_FALSE 释放为高 */
     gpio_write_pin(LCD_CSN_GPIO_CTRL, LCD_CSN_GPIO_INDEX, LCD_CSN_PIN, active ? 0 : 1);
 }
 
-/* ----- SPI 字节写 ----- */
 static void lcd_spi_write_byte(uint8_t byte)
 {
     for (uint8_t bit = 0; bit < 8; bit++) {
@@ -235,14 +236,12 @@ static void lcd_spi_write_byte(uint8_t byte)
         lcd_sck_set(RT_TRUE);
         lcd_sda_set((byte & 0x80U) != 0U ? RT_TRUE : RT_FALSE);
         lcd_spi_delay_us();
-
         lcd_sck_set(RT_FALSE);
         lcd_spi_delay_us();
 #else
         lcd_sck_set(RT_FALSE);
         lcd_sda_set((byte & 0x80U) != 0U ? RT_TRUE : RT_FALSE);
         lcd_spi_delay_us();
-
         lcd_sck_set(RT_TRUE);
         lcd_spi_delay_us();
 #endif
@@ -256,11 +255,10 @@ static void lcd_spi_write_byte(uint8_t byte)
 #endif
 }
 
-/* ----- 命令 / 数据写 ----- */
 static void lcd_write_cmd(uint8_t cmd)
 {
     lcd_csn_set(RT_TRUE);
-    lcd_a0_set(RT_FALSE);   /* A0=0 → 命令 */
+    lcd_a0_set(RT_FALSE);
     lcd_spi_write_byte(cmd);
     lcd_csn_set(RT_FALSE);
 }
@@ -268,7 +266,7 @@ static void lcd_write_cmd(uint8_t cmd)
 static void lcd_write_data_buf(const uint8_t *buf, uint16_t len)
 {
     lcd_csn_set(RT_TRUE);
-    lcd_a0_set(RT_TRUE);    /* A0=1 → 数据 */
+    lcd_a0_set(RT_TRUE);
 
     while (len-- > 0U) {
         lcd_spi_write_byte(*buf++);
@@ -277,47 +275,19 @@ static void lcd_write_data_buf(const uint8_t *buf, uint16_t len)
     lcd_csn_set(RT_FALSE);
 }
 
-static rt_uint32_t lcd_key_raw_to_pin_mv(rt_uint32_t raw)
-{
-    rt_uint64_t pin_mv;
-
-    pin_mv = (rt_uint64_t)raw * APP_ADC_VREF_MV;
-    pin_mv /= APP_ADC_FULL_SCALE;
-
-    return (rt_uint32_t)pin_mv;
-}
-
-static int lcd_key_decode(rt_uint32_t raw_key)
-{
-    rt_uint32_t pin_mv;
-
-    pin_mv = lcd_key_raw_to_pin_mv(raw_key);
-
-    if (pin_mv <= LCD_KEY_S1_MAX_MV) {
-        return 1;
-    }
-    if (pin_mv <= LCD_KEY_S2_MAX_MV) {
-        return 2;
-    }
-    if (pin_mv <= LCD_KEY_S3_MAX_MV) {
-        return 3;
-    }
-    if (pin_mv <= LCD_KEY_S4_MAX_MV) {
-        return 4;
-    }
-
-    return 0;
-}
-
-/* ----- 定位到指定页和列 ----- */
 static void lcd_set_page_col(uint8_t page, uint8_t col)
 {
+    uint8_t hw_col = (uint8_t)(col + LCD_HW_COL_OFFSET);
+
+    if (hw_col >= LCD_COLS) {
+        hw_col = (uint8_t)(hw_col - LCD_COLS);
+    }
+
     lcd_write_cmd(ST7567_CMD_SET_PAGE | (page & 0x0F));
-    lcd_write_cmd(ST7567_CMD_SET_COL_HI | ((col >> 4) & 0x0F));
-    lcd_write_cmd(ST7567_CMD_SET_COL_LO | (col & 0x0F));
+    lcd_write_cmd(ST7567_CMD_SET_COL_HI | ((hw_col >> 4) & 0x0F));
+    lcd_write_cmd(ST7567_CMD_SET_COL_LO | (hw_col & 0x0F));
 }
 
-/* ----- 清屏（DDRAM 全写 0x00）----- */
 void lcd_clear(void)
 {
     static const uint8_t zeros[LCD_COLS] = {0};
@@ -327,7 +297,6 @@ void lcd_clear(void)
     }
 }
 
-/* ----- 全亮测试（DDRAM 全写 0xFF）----- */
 void lcd_fill_all(void)
 {
     static uint8_t ones[LCD_COLS];
@@ -350,13 +319,19 @@ static void lcd_fb_set_pixel(uint8_t x, uint8_t y, rt_bool_t on)
     uint8_t page;
     uint8_t bit;
 
-    if ((x >= LCD_COLS) || (y >= (LCD_PAGES * 8U))) {
+    if ((x >= LCD_COLS) || (y >= LCD_ROWS)) {
         return;
     }
 
-    page = y / 8U;
-    bit = y % 8U;
-
+    /*
+     *
+     *
+     * 当前面板需要翻转页顺序，但页内 bit 顺序保持不变。
+     * 这样可以把第一行移回顶部，同时避免字形上下镜像。
+     */
+    page = (uint8_t)(y / 8U);
+    //bit = y % 8U;
+    bit = 7U - (y % 8U);
     if (on) {
         g_lcd_fb[page][x] |= (uint8_t)(1U << bit);
     } else {
@@ -364,195 +339,241 @@ static void lcd_fb_set_pixel(uint8_t x, uint8_t y, rt_bool_t on)
     }
 }
 
+static void lcd_fb_hline(uint8_t x, uint8_t y, uint8_t len)
+{
+    for (uint8_t i = 0; i < len; i++) {
+        lcd_fb_set_pixel((uint8_t)(x + i), y, RT_TRUE);
+    }
+}
+
+static void lcd_fb_vline(uint8_t x, uint8_t y, uint8_t len)
+{
+    for (uint8_t i = 0; i < len; i++) {
+        lcd_fb_set_pixel(x, (uint8_t)(y + i), RT_TRUE);
+    }
+}
+
 static void lcd_fb_fill_rect(uint8_t x, uint8_t y, uint8_t w, uint8_t h)
 {
-    uint8_t xx;
-    uint8_t yy;
-
-    for (yy = y; yy < (uint8_t)(y + h); yy++) {
-        for (xx = x; xx < (uint8_t)(x + w); xx++) {
-            lcd_fb_set_pixel(xx, yy, RT_TRUE);
+    for (uint8_t yy = 0; yy < h; yy++) {
+        for (uint8_t xx = 0; xx < w; xx++) {
+            lcd_fb_set_pixel((uint8_t)(x + xx), (uint8_t)(y + yy), RT_TRUE);
         }
     }
 }
 
+static void lcd_fb_draw_char5x7(uint8_t x, uint8_t y, char ch)
+{
+    const uint8_t *glyph = lcd_font5x7_get(ch);
+
+    for (uint8_t col = 0; col < 5; col++) {
+        uint8_t bits = glyph[col];
+        for (uint8_t row = 0; row < 7; row++) {
+            if (bits & (1U << row)) {
+                lcd_fb_set_pixel((uint8_t)(x + col), (uint8_t)(y + row), RT_TRUE);
+            }
+        }
+    }
+}
+
+static void lcd_fb_draw_string5x7(uint8_t x, uint8_t y, const char *str)
+{
+    while (*str != '\0') {
+        lcd_fb_draw_char5x7(x, y, *str++);
+        x = (uint8_t)(x + 6U);
+    }
+}
+
+static void lcd_fb_draw_char5x7_scaled(uint8_t x, uint8_t y, char ch, uint8_t scale)
+{
+    const uint8_t *glyph = lcd_font5x7_get(ch);
+
+    if (scale == 0U) {
+        return;
+    }
+
+    for (uint8_t col = 0; col < 5; col++) {
+        uint8_t bits = glyph[col];
+        for (uint8_t row = 0; row < 7; row++) {
+            if (bits & (1U << row)) {
+                lcd_fb_fill_rect((uint8_t)(x + col * scale),
+                                 (uint8_t)(y + row * scale),
+                                 scale,
+                                 scale);
+            }
+        }
+    }
+}
+
+static void lcd_fb_draw_string5x7_scaled(uint8_t x, uint8_t y, const char *str, uint8_t scale)
+{
+    while (*str != '\0') {
+        lcd_fb_draw_char5x7_scaled(x, y, *str++, scale);
+        x = (uint8_t)(x + (6U * scale));
+    }
+}
+
+static uint8_t lcd_string_width5x7(const char *str, uint8_t scale)
+{
+    uint8_t len = 0;
+
+    while (*str != '\0') {
+        len++;
+        str++;
+    }
+
+    return (uint8_t)(len * 6U * scale);
+}
+
+static void lcd_fb_draw_string5x7_scaled_right(uint8_t right_x, uint8_t y, const char *str, uint8_t scale)
+{
+    uint8_t width;
+
+    width = lcd_string_width5x7(str, scale);
+    if (width > right_x) {
+        lcd_fb_draw_string5x7_scaled(0, y, str, scale);
+    } else {
+        lcd_fb_draw_string5x7_scaled((uint8_t)(right_x - width), y, str, scale);
+    }
+}
+
+static void lcd_fb_draw_cn_label(uint8_t x, uint8_t y)
+{
+    for (uint8_t row = 0; row < 12; row++) {
+        uint16_t bits = g_cn_label_rows[row];
+        for (uint8_t col = 0; col < 16; col++) {
+            if (bits & (uint16_t)(1U << (15U - col))) {
+                lcd_fb_set_pixel((uint8_t)(x + col), (uint8_t)(y + row), RT_TRUE);
+            }
+        }
+    }
+}
+
+static void lcd_fb_draw_signal_icon(uint8_t x, uint8_t y)
+{
+    lcd_fb_vline((uint8_t)(x + 1), (uint8_t)(y + 5), 3);
+    lcd_fb_vline((uint8_t)(x + 3), (uint8_t)(y + 4), 4);
+    lcd_fb_vline((uint8_t)(x + 5), (uint8_t)(y + 2), 6);
+    lcd_fb_vline((uint8_t)(x + 7), y, 8);
+}
+
+
+static void lcd_fb_draw_g_box(uint8_t x, uint8_t y)
+{
+    lcd_fb_hline(x, y, 8);
+    lcd_fb_hline(x, (uint8_t)(y + 7), 8);
+    lcd_fb_vline(x, y, 8);
+    lcd_fb_vline((uint8_t)(x + 7), y, 8);
+
+    lcd_fb_hline((uint8_t)(x + 3), (uint8_t)(y + 4), 3);
+    lcd_fb_vline((uint8_t)(x + 5), (uint8_t)(y + 3), 2);
+}
+
+
+static void lcd_fb_draw_status_icon(uint8_t x, uint8_t y)
+{
+    lcd_fb_hline((uint8_t)(x + 1), y, 6);
+    lcd_fb_hline((uint8_t)(x + 1), (uint8_t)(y + 7), 6);
+    lcd_fb_vline(x, (uint8_t)(y + 1), 6);
+    lcd_fb_vline((uint8_t)(x + 7), (uint8_t)(y + 1), 6);
+
+    for (uint8_t i = 0; i < 4; i++) {
+        lcd_fb_set_pixel((uint8_t)(x + 2 + i), (uint8_t)(y + 2 + i), RT_TRUE);
+        lcd_fb_set_pixel((uint8_t)(x + 5 - i), (uint8_t)(y + 2 + i), RT_TRUE);
+    }
+}
+
+
 static void lcd_fb_flush(void)
 {
-    uint8_t page;
-
-    for (page = 0; page < LCD_PAGES; page++) {
+    for (uint8_t page = 0; page < LCD_PAGES; page++) {
         lcd_set_page_col(page, 0);
         lcd_write_data_buf(g_lcd_fb[page], LCD_COLS);
     }
 }
 
-static void lcd_fb_draw_digit_7seg(uint8_t digit)
+static void lcd_render_home_ui(void)
 {
-    rt_bool_t seg_a = RT_FALSE;
-    rt_bool_t seg_b = RT_FALSE;
-    rt_bool_t seg_c = RT_FALSE;
-    rt_bool_t seg_d = RT_FALSE;
-    rt_bool_t seg_e = RT_FALSE;
-    rt_bool_t seg_f = RT_FALSE;
-    rt_bool_t seg_g = RT_FALSE;
+    uint8_t safe_left = 0;
+    uint8_t safe_right = (uint8_t)(LCD_COLS - 1U);
+    uint8_t status_y = 0;
+    uint8_t row1_y = 16;
+    uint8_t row2_y = 32;
+    uint8_t row3_y = 48;
 
-    switch (digit) {
-    case 1:
-        seg_b = RT_TRUE;
-        seg_c = RT_TRUE;
-        break;
-    case 2:
-        seg_a = RT_TRUE;
-        seg_b = RT_TRUE;
-        seg_d = RT_TRUE;
-        seg_e = RT_TRUE;
-        seg_g = RT_TRUE;
-        break;
-    case 3:
-        seg_a = RT_TRUE;
-        seg_b = RT_TRUE;
-        seg_c = RT_TRUE;
-        seg_d = RT_TRUE;
-        seg_g = RT_TRUE;
-        break;
-    case 4:
-        seg_b = RT_TRUE;
-        seg_c = RT_TRUE;
-        seg_f = RT_TRUE;
-        seg_g = RT_TRUE;
-        break;
-    default:
-        return;
-    }
+    lcd_fb_clear();
 
-    if (seg_a) {
-        lcd_fb_fill_rect(44, 6, 38, 6);
-    }
-    if (seg_b) {
-        lcd_fb_fill_rect(82, 12, 6, 18);
-    }
-    if (seg_c) {
-        lcd_fb_fill_rect(82, 36, 6, 18);
-    }
-    if (seg_d) {
-        lcd_fb_fill_rect(44, 54, 38, 6);
-    }
-    if (seg_e) {
-        lcd_fb_fill_rect(38, 36, 6, 18);
-    }
-    if (seg_f) {
-        lcd_fb_fill_rect(38, 12, 6, 18);
-    }
-    if (seg_g) {
-        lcd_fb_fill_rect(44, 30, 38, 6);
-    }
+    /* 第1行：状态图标 */
+    lcd_fb_draw_signal_icon(safe_left, status_y);
+    lcd_fb_draw_g_box((uint8_t)(safe_left + 16), status_y);
+    lcd_fb_draw_status_icon((uint8_t)(safe_left + 32), status_y);
+    lcd_fb_draw_string5x7((uint8_t)(safe_left + 42), (uint8_t)(status_y + 1), "05");
+
+    /* 第2行：左侧车速，右侧时间 */
+    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), row1_y, "0 km/h");
+    lcd_fb_draw_string5x7_scaled_right(safe_right, row1_y, "09:16:45", 1);
+
+    /* 第3行：先用已有字模代替“连续驾驶” */
+    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), row2_y, "G 00");
+    lcd_fb_draw_string5x7_scaled_right(safe_right, row2_y, "00:00:00", 1);
+
+    /* 第4行：方块 + 编号 */
+    lcd_fb_fill_rect((uint8_t)(safe_left + 1), (uint8_t)(row3_y + 1), 6, 6);
+    lcd_fb_draw_string5x7((uint8_t)(safe_left + 10), row3_y, "800000000000255304");
+
+    lcd_fb_flush();
 }
 
-/* ----- ST7567 初始化序列 ----- */
+
+
 static void st7567_init_seq(void)
 {
-    /* 上电后等待电源稳定，然后硬件复位 */
     rt_thread_mdelay(10);
     lcd_reset();
 
-    /* 1. Bias = 1/9（对应 1/65 Duty）*/
     lcd_write_cmd(ST7567_CMD_BIAS_1_9);
-
-    /* 2. SEG 方向 */
     lcd_write_cmd(ST7567_CMD_SEG_NORMAL);
-
-    /* 3. COM 方向 */
-    lcd_write_cmd(ST7567_CMD_COM_REVERSE);
-
-    /* 4. 起始行 = 0 */
+    lcd_write_cmd(ST7567_CMD_COM_NORMAL);
     lcd_write_cmd(ST7567_CMD_SET_START_LINE | 0x00);
-
-    /* 5. 内部电阻比 */
     lcd_write_cmd(ST7567_CMD_REG_RATIO | ST7567_INIT_REG_RATIO);
-
-    /* 6. 电子音量（对比度） */
     lcd_write_cmd(ST7567_CMD_SET_EV);
     lcd_write_cmd(ST7567_INIT_EV);
-
-    /* 7. 升压比 */
     lcd_write_cmd(ST7567_CMD_SET_BOOSTER);
     lcd_write_cmd(ST7567_CMD_BOOSTER_X5);
-
-    /* 8. 电源控制：Booster + Regulator + Follower 全开 */
     lcd_write_cmd(ST7567_CMD_POWER_ALL_ON);
-
     rt_thread_mdelay(120);
-
-    /* 9. 正常显示，不反色 */
     lcd_write_cmd(ST7567_CMD_INVERSE_OFF);
-
-    /* 10. 恢复正常显示模式（读 DDRAM） */
     lcd_write_cmd(ST7567_CMD_ALL_PIXEL_OFF);
-
-    /* 11. 清 DDRAM */
     lcd_clear();
-
-    /* 12. 打开显示 */
     lcd_write_cmd(ST7567_CMD_DISPLAY_ON);
 }
 
-/* ----- svc_lcd_init：外部调用入口 ----- */
 int svc_lcd_init(void)
 {
-    /* 1. GPIO / SPI 引脚配置 */
     svc_lcd_ctrl_pins_init();
-
-    /* 2. SPI 引脚初始化 */
     svc_lcd_spi_hw_init();
 
-    /* 3. 初始电平：CS 无效（高）、A0=数据、背光关 */
     lcd_csn_set(RT_FALSE);
     lcd_a0_set(RT_TRUE);
     lcd_backlight_off();
 
-    /* 4. ST7567 初始化序列 */
     st7567_init_seq();
 
     APP_NON_CAN_LOG("LCD ST7567 init done\r\n");
     return RT_EOK;
 }
 
-/* ----- LCD 任务线程 ----- */
 static void svc_lcd_thread_entry(void *arg)
 {
-    const app_adc_snapshot_t *adc_snapshot;
-    int key_value;
-    int last_key_value = -1;
-
     RT_UNUSED(arg);
 
     lcd_backlight_on();
-    lcd_fb_clear();
-    lcd_fb_flush();
-
-    /* 等 ADC 线程完成首次采样，避免上电初始 0 被误判成 S1 */
-    rt_thread_mdelay(APP_ADC_STARTUP_DELAY_MS + 200U);
+    lcd_render_home_ui();
+    APP_NON_CAN_LOG("LCD: home ui rendered\r\n");
 
     while (1)
     {
-        adc_snapshot = svc_adc_get_snapshot();
-        key_value = lcd_key_decode(adc_snapshot->raw_key);
-
-        if (key_value != last_key_value) {
-            lcd_fb_clear();
-            if (key_value != 0) {
-                lcd_fb_draw_digit_7seg((uint8_t)key_value);
-            }
-            lcd_fb_flush();
-
-            APP_NON_CAN_LOG("LCD KEY: raw=%lu pin=%lumV show=%d\r\n",
-                            adc_snapshot->raw_key,
-                            lcd_key_raw_to_pin_mv(adc_snapshot->raw_key),
-                            key_value);
-            last_key_value = key_value;
-        }
-
-        rt_thread_mdelay(100);
+        rt_thread_mdelay(1000);
     }
 }
 
@@ -575,4 +596,19 @@ int svc_lcd_task_start(void)
     rt_thread_startup(thread);
     return RT_EOK;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
