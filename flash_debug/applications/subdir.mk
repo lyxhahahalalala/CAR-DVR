@@ -14,7 +14,8 @@ C_SRCS += \
 ../applications/svc_led.c \
 ../applications/svc_power.c \
 ../applications/svc_storage.c \
-../applications/svc_vehicle_io.c 
+../applications/svc_vehicle_io.c \
+../applications/test.c 
 
 OBJS += \
 ./applications/app_can.o \
@@ -27,7 +28,8 @@ OBJS += \
 ./applications/svc_led.o \
 ./applications/svc_power.o \
 ./applications/svc_storage.o \
-./applications/svc_vehicle_io.o 
+./applications/svc_vehicle_io.o \
+./applications/test.o 
 
 C_DEPS += \
 ./applications/app_can.d \
@@ -40,7 +42,8 @@ C_DEPS += \
 ./applications/svc_led.d \
 ./applications/svc_power.d \
 ./applications/svc_storage.d \
-./applications/svc_vehicle_io.d 
+./applications/svc_vehicle_io.d \
+./applications/test.d 
 
 
 # Each subdirectory must supply rules for building sources it contributes

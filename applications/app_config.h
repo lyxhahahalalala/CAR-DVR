@@ -131,7 +131,7 @@
 #define APP_CAN_TASK_PERIOD_MS       1200
 #define APP_IO_TASK_PERIOD_MS        1400
 #define APP_STORAGE_TASK_PERIOD_MS   1600
-#define APP_LCD_TASK_PERIOD_MS       1800
+#define APP_LCD_TASK_PERIOD_MS       900
 
 #if APP_CAN_LOG_ENABLE
 #define APP_CAN_LOG(...)             rt_kprintf(__VA_ARGS__)

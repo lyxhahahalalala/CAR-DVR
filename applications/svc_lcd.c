@@ -6,6 +6,7 @@
 #include "hpm_gpio_drv.h"
 #include "hpm_spi_drv.h"
 #include "app_config.h"
+#include "svc_adc.h"
 #include "svc_lcd.h"
 
 /*
@@ -119,6 +120,21 @@
 /* LCD 有效页数（每页 8 行，共 64 行 = 8 页；icon 行作为第 8 页不使用）*/
 #define LCD_PAGES   8
 
+/*
+ * 按键分压测试阈值，按原理图标称电压的相邻中点划分：
+ * S1 = 0V
+ * S2 = 0.807V
+ * S3 = 2.142V
+ * S4 = 2.773V
+ * 无按键 = 3.3V
+ */
+#define LCD_KEY_S1_MAX_MV           400U
+#define LCD_KEY_S2_MAX_MV           1475U
+#define LCD_KEY_S3_MAX_MV           2300U
+#define LCD_KEY_S4_MAX_MV           2900U
+
+static uint8_t g_lcd_fb[LCD_PAGES][LCD_COLS];
+
 /* ----- 软件 SPI 初始化 ----- */
 static void svc_lcd_spi_hw_init(void)
 {
@@ -211,21 +227,6 @@ void lcd_csn_set(rt_bool_t active)
     gpio_write_pin(LCD_CSN_GPIO_CTRL, LCD_CSN_GPIO_INDEX, LCD_CSN_PIN, active ? 0 : 1);
 }
 
-static void lcd_diag_toggle_line(const char *name, void (*set_fn)(rt_bool_t), rt_bool_t active_high)
-{
-    APP_NON_CAN_LOG("LCD DIAG: toggle %s\r\n", name);
-    for (int i = 0; i < 20; i++) {
-        set_fn(active_high ? RT_TRUE : RT_FALSE);
-        rt_thread_mdelay(100);
-        set_fn(active_high ? RT_FALSE : RT_TRUE);
-        rt_thread_mdelay(100);
-    }
-}
-
-static void lcd_diag_toggle_rstb(rt_bool_t high)
-{
-    gpio_write_pin(LCD_RSTB_GPIO_CTRL, LCD_RSTB_GPIO_INDEX, LCD_RSTB_PIN, high ? 1 : 0);
-}
 /* ----- SPI 字节写 ----- */
 static void lcd_spi_write_byte(uint8_t byte)
 {
@@ -264,15 +265,6 @@ static void lcd_write_cmd(uint8_t cmd)
     lcd_csn_set(RT_FALSE);
 }
 
-static void lcd_write_data(uint8_t dat)
-{
-    lcd_csn_set(RT_TRUE);
-    lcd_a0_set(RT_TRUE);    /* A0=1 → 数据 */
-    lcd_spi_write_byte(dat);
-    lcd_csn_set(RT_FALSE);
-}
-
-/* ----- 批量写数据（同一页连续列）----- */
 static void lcd_write_data_buf(const uint8_t *buf, uint16_t len)
 {
     lcd_csn_set(RT_TRUE);
@@ -283,6 +275,38 @@ static void lcd_write_data_buf(const uint8_t *buf, uint16_t len)
     }
 
     lcd_csn_set(RT_FALSE);
+}
+
+static rt_uint32_t lcd_key_raw_to_pin_mv(rt_uint32_t raw)
+{
+    rt_uint64_t pin_mv;
+
+    pin_mv = (rt_uint64_t)raw * APP_ADC_VREF_MV;
+    pin_mv /= APP_ADC_FULL_SCALE;
+
+    return (rt_uint32_t)pin_mv;
+}
+
+static int lcd_key_decode(rt_uint32_t raw_key)
+{
+    rt_uint32_t pin_mv;
+
+    pin_mv = lcd_key_raw_to_pin_mv(raw_key);
+
+    if (pin_mv <= LCD_KEY_S1_MAX_MV) {
+        return 1;
+    }
+    if (pin_mv <= LCD_KEY_S2_MAX_MV) {
+        return 2;
+    }
+    if (pin_mv <= LCD_KEY_S3_MAX_MV) {
+        return 3;
+    }
+    if (pin_mv <= LCD_KEY_S4_MAX_MV) {
+        return 4;
+    }
+
+    return 0;
 }
 
 /* ----- 定位到指定页和列 ----- */
@@ -316,6 +340,114 @@ void lcd_fill_all(void)
     }
 }
 
+static void lcd_fb_clear(void)
+{
+    rt_memset(g_lcd_fb, 0, sizeof(g_lcd_fb));
+}
+
+static void lcd_fb_set_pixel(uint8_t x, uint8_t y, rt_bool_t on)
+{
+    uint8_t page;
+    uint8_t bit;
+
+    if ((x >= LCD_COLS) || (y >= (LCD_PAGES * 8U))) {
+        return;
+    }
+
+    page = y / 8U;
+    bit = y % 8U;
+
+    if (on) {
+        g_lcd_fb[page][x] |= (uint8_t)(1U << bit);
+    } else {
+        g_lcd_fb[page][x] &= (uint8_t)~(1U << bit);
+    }
+}
+
+static void lcd_fb_fill_rect(uint8_t x, uint8_t y, uint8_t w, uint8_t h)
+{
+    uint8_t xx;
+    uint8_t yy;
+
+    for (yy = y; yy < (uint8_t)(y + h); yy++) {
+        for (xx = x; xx < (uint8_t)(x + w); xx++) {
+            lcd_fb_set_pixel(xx, yy, RT_TRUE);
+        }
+    }
+}
+
+static void lcd_fb_flush(void)
+{
+    uint8_t page;
+
+    for (page = 0; page < LCD_PAGES; page++) {
+        lcd_set_page_col(page, 0);
+        lcd_write_data_buf(g_lcd_fb[page], LCD_COLS);
+    }
+}
+
+static void lcd_fb_draw_digit_7seg(uint8_t digit)
+{
+    rt_bool_t seg_a = RT_FALSE;
+    rt_bool_t seg_b = RT_FALSE;
+    rt_bool_t seg_c = RT_FALSE;
+    rt_bool_t seg_d = RT_FALSE;
+    rt_bool_t seg_e = RT_FALSE;
+    rt_bool_t seg_f = RT_FALSE;
+    rt_bool_t seg_g = RT_FALSE;
+
+    switch (digit) {
+    case 1:
+        seg_b = RT_TRUE;
+        seg_c = RT_TRUE;
+        break;
+    case 2:
+        seg_a = RT_TRUE;
+        seg_b = RT_TRUE;
+        seg_d = RT_TRUE;
+        seg_e = RT_TRUE;
+        seg_g = RT_TRUE;
+        break;
+    case 3:
+        seg_a = RT_TRUE;
+        seg_b = RT_TRUE;
+        seg_c = RT_TRUE;
+        seg_d = RT_TRUE;
+        seg_g = RT_TRUE;
+        break;
+    case 4:
+        seg_b = RT_TRUE;
+        seg_c = RT_TRUE;
+        seg_f = RT_TRUE;
+        seg_g = RT_TRUE;
+        break;
+    default:
+        return;
+    }
+
+    if (seg_a) {
+        lcd_fb_fill_rect(44, 6, 38, 6);
+    }
+    if (seg_b) {
+        lcd_fb_fill_rect(82, 12, 6, 18);
+    }
+    if (seg_c) {
+        lcd_fb_fill_rect(82, 36, 6, 18);
+    }
+    if (seg_d) {
+        lcd_fb_fill_rect(44, 54, 38, 6);
+    }
+    if (seg_e) {
+        lcd_fb_fill_rect(38, 36, 6, 18);
+    }
+    if (seg_f) {
+        lcd_fb_fill_rect(38, 12, 6, 18);
+    }
+    if (seg_g) {
+        lcd_fb_fill_rect(44, 30, 38, 6);
+    }
+}
+
 /* ----- ST7567 初始化序列 ----- */
 static void st7567_init_seq(void)
 {
@@ -323,47 +455,38 @@ static void st7567_init_seq(void)
     rt_thread_mdelay(10);
     lcd_reset();
 
-    /*
-     * 规格书第 10 节：从复位释放到 Power Control 命令，必须在 5ms 内完成。
-     * 以下命令组顺序严格按规格书 Power ON 流程。
-     */
-
     /* 1. Bias = 1/9（对应 1/65 Duty）*/
     lcd_write_cmd(ST7567_CMD_BIAS_1_9);
 
-    /* 2. SEG 方向：正向（视显示画面是否需要水平镜像，可改为 ST7567_CMD_SEG_REVERSE）*/
+    /* 2. SEG 方向 */
     lcd_write_cmd(ST7567_CMD_SEG_NORMAL);
 
-    /* 3. COM 方向：反向（视显示画面是否需要垂直翻转，可改为 ST7567_CMD_COM_NORMAL）*/
+    /* 3. COM 方向 */
     lcd_write_cmd(ST7567_CMD_COM_REVERSE);
 
     /* 4. 起始行 = 0 */
     lcd_write_cmd(ST7567_CMD_SET_START_LINE | 0x00);
 
-    /* 5. 内部电阻比：RR = 6.0 */
+    /* 5. 内部电阻比 */
     lcd_write_cmd(ST7567_CMD_REG_RATIO | ST7567_INIT_REG_RATIO);
 
-    /* 6. 电子音量（对比度），双字节指令 */
+    /* 6. 电子音量（对比度） */
     lcd_write_cmd(ST7567_CMD_SET_EV);
     lcd_write_cmd(ST7567_INIT_EV);
 
-    /* 7. 升压比，双字节指令：×5（适用于 3.3V 供电）*/
+    /* 7. 升压比 */
     lcd_write_cmd(ST7567_CMD_SET_BOOSTER);
     lcd_write_cmd(ST7567_CMD_BOOSTER_X5);
 
     /* 8. 电源控制：Booster + Regulator + Follower 全开 */
     lcd_write_cmd(ST7567_CMD_POWER_ALL_ON);
 
-    /*
-     * 等待内部升压电路稳定。
-     * 规格书建议：Booster/Regulator/Follower 各需最多 100ms。
-     * 实际 3.3V + X5 升压，等 120ms 足够。
-     */
     rt_thread_mdelay(120);
+
     /* 9. 正常显示，不反色 */
     lcd_write_cmd(ST7567_CMD_INVERSE_OFF);
 
-    /* 10. 先恢复正常显示模式（读 DDRAM），不在初始化阶段长期停留在 A5 */
+    /* 10. 恢复正常显示模式（读 DDRAM） */
     lcd_write_cmd(ST7567_CMD_ALL_PIXEL_OFF);
 
     /* 11. 清 DDRAM */
@@ -379,7 +502,7 @@ int svc_lcd_init(void)
     /* 1. GPIO / SPI 引脚配置 */
     svc_lcd_ctrl_pins_init();
 
-    /* 2. SPI0 硬件初始化 */
+    /* 2. SPI 引脚初始化 */
     svc_lcd_spi_hw_init();
 
     /* 3. 初始电平：CS 无效（高）、A0=数据、背光关 */
@@ -397,41 +520,39 @@ int svc_lcd_init(void)
 /* ----- LCD 任务线程 ----- */
 static void svc_lcd_thread_entry(void *arg)
 {
-    /*
-     * Bring-up 验证步骤：
-     * 1. 先用 A5/A4 验证命令链路是否生效
-     * 2. 再用 DDRAM 全 1 / 全 0 验证显存写入链路
-     */
+    const app_adc_snapshot_t *adc_snapshot;
+    int key_value;
+    int last_key_value = -1;
+
+    RT_UNUSED(arg);
 
     lcd_backlight_on();
+    lcd_fb_clear();
+    lcd_fb_flush();
 
-    /* 步骤 1：A5 强制全亮，验证命令链路 */
-    lcd_write_cmd(ST7567_CMD_ALL_PIXEL_ON);
-    APP_NON_CAN_LOG("LCD: cmd A5 all-pixel-on\r\n");
-    rt_thread_mdelay(3000);
+    /* 等 ADC 线程完成首次采样，避免上电初始 0 被误判成 S1 */
+    rt_thread_mdelay(APP_ADC_STARTUP_DELAY_MS + 200U);
 
-    /* 步骤 2：A4 恢复正常显示模式 */
-    lcd_write_cmd(ST7567_CMD_ALL_PIXEL_OFF);
-    APP_NON_CAN_LOG("LCD: cmd A4 normal-display\r\n");
-    rt_thread_mdelay(1500);
-
-    /* 步骤 3：DDRAM 全 1，验证显存写入链路 */
-    lcd_fill_all();
-    APP_NON_CAN_LOG("LCD: DDRAM fill 0xFF\r\n");
-    rt_thread_mdelay(3000);
-
-    /* 步骤 4：DDRAM 全 0，验证清屏链路 */
-    lcd_clear();
-    APP_NON_CAN_LOG("LCD: DDRAM clear 0x00\r\n");
-    rt_thread_mdelay(2000);
-
-    /* 步骤 5：循环交替全亮/清屏，方便持续观察 */
     while (1)
     {
-        lcd_fill_all();
-        rt_thread_mdelay(APP_LCD_TASK_PERIOD_MS);
-        lcd_clear();
-        rt_thread_mdelay(APP_LCD_TASK_PERIOD_MS);
+        adc_snapshot = svc_adc_get_snapshot();
+        key_value = lcd_key_decode(adc_snapshot->raw_key);
+
+        if (key_value != last_key_value) {
+            lcd_fb_clear();
+            if (key_value != 0) {
+                lcd_fb_draw_digit_7seg((uint8_t)key_value);
+            }
+            lcd_fb_flush();
+
+            APP_NON_CAN_LOG("LCD KEY: raw=%lu pin=%lumV show=%d\r\n",
+                            adc_snapshot->raw_key,
+                            lcd_key_raw_to_pin_mv(adc_snapshot->raw_key),
+                            key_value);
+            last_key_value = key_value;
+        }
+
+        rt_thread_mdelay(100);
     }
 }
 
@@ -454,15 +575,4 @@ int svc_lcd_task_start(void)
     rt_thread_startup(thread);
     return RT_EOK;
 }
-
-
-
-
-
-
-
-
-
-
-
 
