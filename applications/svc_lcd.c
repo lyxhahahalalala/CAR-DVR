@@ -503,23 +503,44 @@ static void lcd_render_home_ui(void)
 
     lcd_fb_clear();
 
-    /* 第1行：状态图标 */
-    lcd_fb_draw_signal_icon(safe_left, status_y);
-    lcd_fb_draw_g_box((uint8_t)(safe_left + 16), status_y);
-    lcd_fb_draw_status_icon((uint8_t)(safe_left + 32), status_y);
-    lcd_fb_draw_string5x7((uint8_t)(safe_left + 42), (uint8_t)(status_y + 1), "05");
+//    /* 第1行：状态图标 */
+//    lcd_fb_draw_signal_icon(safe_left, status_y);
+//    lcd_fb_draw_g_box((uint8_t)(safe_left + 16), status_y);
+//    lcd_fb_draw_status_icon((uint8_t)(safe_left + 32), status_y);
+//    lcd_fb_draw_string5x7((uint8_t)(safe_left + 42), (uint8_t)(status_y + 1), "05");
+//
+//    /* 第2行：左侧车速，右侧时间 */
+//    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), row1_y, "0 km/h");
+//    lcd_fb_draw_string5x7_scaled_right(safe_right, row1_y, "09:16:45", 1);
+//
+//    /* 第3行：先用已有字模代替“连续驾驶” */
+//    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), row2_y, "G 00");
+//    lcd_fb_draw_string5x7_scaled_right(safe_right, row2_y, "00:00:00", 1);
+//
+//    /* 第4行：方块 + 编号 */
+//    lcd_fb_fill_rect((uint8_t)(safe_left + 1), (uint8_t)(row3_y + 1), 6, 6);
+//    lcd_fb_draw_string5x7((uint8_t)(safe_left + 10), row3_y, "800000000000255304");
 
-    /* 第2行：左侧车速，右侧时间 */
-    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), row1_y, "0 km/h");
-    lcd_fb_draw_string5x7_scaled_right(safe_right, row1_y, "09:16:45", 1);
+    /* 第1行：故意放原第2行内容 */
+    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), status_y, "0 km/h");
+    lcd_fb_draw_string5x7_scaled_right(safe_right, status_y, "09:16:45", 1);
 
-    /* 第3行：先用已有字模代替“连续驾驶” */
-    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), row2_y, "G 00");
-    lcd_fb_draw_string5x7_scaled_right(safe_right, row2_y, "00:00:00", 1);
+    /* 第2行：故意放原第1行内容 */
+    lcd_fb_draw_signal_icon(safe_left, row1_y);
+    lcd_fb_draw_g_box((uint8_t)(safe_left + 16), row1_y);
+    lcd_fb_draw_status_icon((uint8_t)(safe_left + 32), row1_y);
+    lcd_fb_draw_string5x7((uint8_t)(safe_left + 42), (uint8_t)(row1_y + 1), "05");
 
-    /* 第4行：方块 + 编号 */
-    lcd_fb_fill_rect((uint8_t)(safe_left + 1), (uint8_t)(row3_y + 1), 6, 6);
-    lcd_fb_draw_string5x7((uint8_t)(safe_left + 10), row3_y, "800000000000255304");
+    /* 第3行：故意放原第4行内容 */
+    lcd_fb_fill_rect((uint8_t)(safe_left + 1), (uint8_t)(row2_y + 1), 6, 6);
+    lcd_fb_draw_string5x7((uint8_t)(safe_left + 10), row2_y, "800000000000255304");
+
+    /* 第4行：故意放原第3行内容 */
+    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), row3_y, "G 00");
+    lcd_fb_draw_string5x7_scaled_right(safe_right, row3_y, "00:00:00", 1);
+
+
+
 
     lcd_fb_flush();
 }

@@ -22731,8 +22731,8 @@ END GROUP
  .rodata.lcd_font5x7_get
                 0x000000008001e3d4      0x138 ./applications/svc_lcd.o
  .rodata.lcd_render_home_ui.str1.4
-                0x000000008001e50c       0x3f ./applications/svc_lcd.o
- *fill*         0x000000008001e54b        0x1 
+                0x000000008001e50c       0x3d ./applications/svc_lcd.o
+ *fill*         0x000000008001e549        0x3 
  .rodata.svc_lcd_thread_entry.str1.4
                 0x000000008001e54c       0x18 ./applications/svc_lcd.o
  .rodata.svc_lcd_init.str1.4
