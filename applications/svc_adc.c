@@ -80,6 +80,8 @@ static void svc_adc_update_key_events(void)
     adc_key_t key_now = svc_adc_decode_key();
 
 //    APP_NON_CAN_LOG("KEY raw=%lu mv=%d key=%d\r\n",
+
+
 //                    g_adc_snapshot.raw_key,
 //                    g_adc_snapshot.mv_key,
 //                    key_now);

@@ -793,9 +793,12 @@ static void svc_lcd_thread_entry(void *arg)
             if (g_lcd_menu_mode == RT_FALSE) {
                 g_lcd_menu_mode = RT_TRUE;
                 g_lcd_menu_index = 0U;
-                g_lcd_need_redraw = RT_TRUE;
+            } else {
+                g_lcd_menu_mode = RT_FALSE;
             }
+            g_lcd_need_redraw = RT_TRUE;
         }
+
 
         if (g_lcd_menu_mode == RT_TRUE) {
             if (svc_adc_consume_s2_event() == RT_TRUE) {
