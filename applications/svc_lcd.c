@@ -1,4 +1,4 @@
-﻿#include <rtthread.h>
+#include <rtthread.h>
 
 #include "board.h"
 #include "hpm_gpiom_drv.h"
@@ -101,32 +101,46 @@
 
 static uint8_t g_lcd_fb[LCD_PAGES][LCD_COLS];
 
-static const uint8_t g_cn_lian[32] = {
-    0x00,0x02,0x04,0x02,0xe8,0x7f,0x08,0x01,
-    0x00,0x05,0x80,0x04,0xcf,0x3f,0x08,0x04,
-    0x08,0x04,0x08,0x04,0xe8,0x7f,0x08,0x04,
-    0x08,0x04,0x14,0x04,0xe2,0x7f,0x00,0x00,
+static const uint8_t g_cn12_lian[24] = {
+    0x42,0x00,0xf4,0x07,0x44,0x00,0xa0,0x00,
+    0xf7,0x03,0x84,0x00,0xf4,0x07,0x84,0x00,
+    0x84,0x00,0x8a,0x00,0xf1,0x07,0x00,0x00,
 };
 
-static const uint8_t g_cn_xu[32] = {
-    0x08,0x04,0x08,0x04,0x84,0x3f,0x24,0x04,
-    0x22,0x04,0xdf,0x7f,0x08,0x40,0x04,0x29,
-    0x02,0x0a,0xbf,0x08,0x02,0x09,0xc0,0x7f,
-    0x38,0x14,0x07,0x22,0x02,0x41,0xc0,0x40,
+static const uint8_t g_cn12_xu[24] = {
+    0x84,0x00,0xe4,0x03,0x82,0x00,0xea,0x07,
+    0x27,0x05,0x54,0x01,0x22,0x01,0xf7,0x07,
+    0x80,0x00,0x4c,0x03,0x33,0x04,0x00,0x00,
 };
 
-static const uint8_t g_cn_jia[32] = {
-    0x10,0x00,0x10,0x00,0xfe,0x3e,0x88,0x22,
-    0x88,0x22,0xa4,0x3e,0x42,0x00,0xf8,0x07,
-    0x00,0x04,0x10,0x04,0x10,0x04,0xf0,0x3f,
-    0x00,0x20,0xfe,0x23,0x00,0x28,0x00,0x10,
+static const uint8_t g_cn12_jia[24] = {
+    0x04,0x00,0xbf,0x07,0xa4,0x04,0xba,0x07,
+    0x01,0x00,0xfe,0x01,0x08,0x01,0xf8,0x07,
+    0x00,0x04,0xff,0x04,0x00,0x03,0x00,0x00,
 };
 
-static const uint8_t g_cn_shi[32] = {
-    0x00,0x04,0x1f,0x04,0x10,0x04,0x92,0x3f,
-    0x92,0x24,0x92,0x24,0x92,0x24,0xbe,0x24,
-    0xa0,0x3f,0x20,0x04,0x38,0x05,0x27,0x06,
-    0x22,0x06,0x20,0x09,0x94,0x10,0x48,0x60,
+static const uint8_t g_cn12_shi[24] = {
+    0x0f,0x01,0x08,0x01,0xea,0x07,0x2a,0x05,
+    0x2a,0x05,0xfe,0x07,0x10,0x05,0x57,0x01,
+    0x90,0x00,0x50,0x01,0x2c,0x06,0x00,0x00,
+};
+
+static const uint8_t g_icon_signal_12x12[24] = {
+    0x00,0x00,0x00,0xe0,0x3e,0xe0,0x1e,0xc0,
+    0x0c,0xc2,0x0c,0xc3,0x8c,0xc3,0xcc,0xc3,
+    0xec,0xc3,0xfc,0x03,0x00,0x00,0x00,0xf0,
+};
+
+static const uint8_t g_icon_g_12x12[24] = {
+    0xff,0x3f,0x03,0x3c,0x03,0x3c,0xf3,0xbd,
+    0x1b,0xbc,0x9b,0xbd,0x1b,0xbd,0xfb,0x3d,
+    0xf3,0x3c,0x03,0xfc,0xff,0xff,0xff,0x0f,
+};
+
+static const uint8_t g_icon_status_12x12[24] = {
+    0x00,0xc0,0x0c,0x46,0xb4,0xc5,0xcc,0x84,
+    0xa8,0x02,0x10,0x83,0xb8,0x83,0xc8,0x44,
+    0xe4,0xc5,0x1c,0x06,0x00,0x00,0x00,0xf0,
 };
 
 
@@ -456,31 +470,15 @@ static void lcd_fb_draw_string5x7_scaled_right(uint8_t right_x, uint8_t y, const
     }
 }
 
-//static void lcd_fb_draw_cn_char16x16(uint8_t x, uint8_t y, const uint8_t glyph[32])
-//{
-//    for (uint8_t row = 0; row < 16; row++) {
-//        uint16_t bits = (uint16_t)glyph[row * 2]
-//                      | ((uint16_t)glyph[row * 2 + 1] << 8);
-//        uint8_t draw_y = (uint8_t)(y + (row & 0xF8U) + (7U - (row & 0x07U)));
-//
-//        for (uint8_t col = 0; col < 16; col++) {
-//            if (bits & (uint16_t)(1U << col)) {
-//                lcd_fb_set_pixel((uint8_t)(x + col), draw_y, RT_TRUE);
-//            }
-//        }
-//    }
-//}
-
-
-static void lcd_fb_draw_cn_char16x16(uint8_t x, uint8_t y, const uint8_t glyph[32])
+static void lcd_fb_draw_bitmap12x12(uint8_t x, uint8_t y, const uint8_t glyph[24])
 {
-    for (uint8_t row = 0; row < 16; row++) {
-        uint8_t src_row = (uint8_t)(15U - row);
+    for (uint8_t row = 0; row < 12; row++) {
+        uint8_t src_row = (uint8_t)(11U - row);
         uint16_t bits = (uint16_t)glyph[src_row * 2]
                       | ((uint16_t)glyph[src_row * 2 + 1] << 8);
         uint8_t draw_y = (uint8_t)(y + (row & 0xF8U) + (7U - (row & 0x07U)));
 
-        for (uint8_t col = 0; col < 16; col++) {
+        for (uint8_t col = 0; col < 12; col++) {
             if (bits & (uint16_t)(1U << col)) {
                 lcd_fb_set_pixel((uint8_t)(x + col), draw_y, RT_TRUE);
             }
@@ -490,55 +488,21 @@ static void lcd_fb_draw_cn_char16x16(uint8_t x, uint8_t y, const uint8_t glyph[3
 
 
 
-
-
-
-
-
-static void lcd_fb_draw_cn_string_lxjs(uint8_t x, uint8_t y)
+static void lcd_fb_draw_cn12_string_lxjs(uint8_t x, uint8_t y)
 {
-    lcd_fb_draw_cn_char16x16(x, y, g_cn_lian);
-    lcd_fb_draw_cn_char16x16((uint8_t)(x + 16), y, g_cn_xu);
-    lcd_fb_draw_cn_char16x16((uint8_t)(x + 32), y, g_cn_jia);
-    lcd_fb_draw_cn_char16x16((uint8_t)(x + 48), y, g_cn_shi);
+    lcd_fb_draw_bitmap12x12(x, y, g_cn12_lian);
+    lcd_fb_draw_bitmap12x12((uint8_t)(x + 12), y, g_cn12_xu);
+    lcd_fb_draw_bitmap12x12((uint8_t)(x + 24), y, g_cn12_jia);
+    lcd_fb_draw_bitmap12x12((uint8_t)(x + 36), y, g_cn12_shi);
 }
 
-
-
-static void lcd_fb_draw_signal_icon(uint8_t x, uint8_t y)
+static void lcd_fb_draw_top_icons_12x12(uint8_t x, uint8_t y)
 {
-    lcd_fb_vline((uint8_t)(x + 1), (uint8_t)(y + 5), 3);
-    lcd_fb_vline((uint8_t)(x + 3), (uint8_t)(y + 4), 4);
-    lcd_fb_vline((uint8_t)(x + 5), (uint8_t)(y + 2), 6);
-    lcd_fb_vline((uint8_t)(x + 7), y, 8);
+    lcd_fb_draw_bitmap12x12(x, y, g_icon_signal_12x12);
+    lcd_fb_draw_bitmap12x12((uint8_t)(x + 18), y, g_icon_g_12x12);
+    lcd_fb_draw_bitmap12x12((uint8_t)(x + 36), y, g_icon_status_12x12);
+    lcd_fb_draw_string5x7((uint8_t)(x + 50), (uint8_t)(y + 1), "05");
 }
-
-
-static void lcd_fb_draw_g_box(uint8_t x, uint8_t y)
-{
-    lcd_fb_hline(x, y, 8);
-    lcd_fb_hline(x, (uint8_t)(y + 7), 8);
-    lcd_fb_vline(x, y, 8);
-    lcd_fb_vline((uint8_t)(x + 7), y, 8);
-
-    lcd_fb_hline((uint8_t)(x + 3), (uint8_t)(y + 4), 3);
-    lcd_fb_vline((uint8_t)(x + 5), (uint8_t)(y + 3), 2);
-}
-
-
-static void lcd_fb_draw_status_icon(uint8_t x, uint8_t y)
-{
-    lcd_fb_hline((uint8_t)(x + 1), y, 6);
-    lcd_fb_hline((uint8_t)(x + 1), (uint8_t)(y + 7), 6);
-    lcd_fb_vline(x, (uint8_t)(y + 1), 6);
-    lcd_fb_vline((uint8_t)(x + 7), (uint8_t)(y + 1), 6);
-
-    for (uint8_t i = 0; i < 4; i++) {
-        lcd_fb_set_pixel((uint8_t)(x + 2 + i), (uint8_t)(y + 2 + i), RT_TRUE);
-        lcd_fb_set_pixel((uint8_t)(x + 5 - i), (uint8_t)(y + 2 + i), RT_TRUE);
-    }
-}
-
 
 static void lcd_fb_flush(void)
 {
@@ -547,6 +511,9 @@ static void lcd_fb_flush(void)
         lcd_write_data_buf(g_lcd_fb[page], LCD_COLS);
     }
 }
+
+
+
 
 static void lcd_render_home_ui(void)
 {
@@ -560,21 +527,20 @@ static void lcd_render_home_ui(void)
     lcd_fb_clear();
 
     /* 第1行位置显示原第2行内容 */
-    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), status_y, "0 km/h");
-    lcd_fb_draw_string5x7_scaled_right(safe_right, status_y, "09:16:45", 1);
+    lcd_fb_draw_string5x7((uint8_t)(safe_left + 2), 1, "0 km/h");
+    lcd_fb_draw_string5x7_scaled_right(safe_right, 1, "09:16:45", 1);
+
 
     /* 第2行位置显示原第1行内容 */
-    lcd_fb_draw_signal_icon(safe_left, row1_y);
-    lcd_fb_draw_g_box((uint8_t)(safe_left + 16), row1_y);
-    lcd_fb_draw_status_icon((uint8_t)(safe_left + 32), row1_y);
-    lcd_fb_draw_string5x7((uint8_t)(safe_left + 42), (uint8_t)(row1_y + 1), "05");
+    lcd_fb_draw_top_icons_12x12(safe_left, (uint8_t)(row1_y ));
+
 
     /* 第3行位置显示原第4行内容 */
     lcd_fb_fill_rect((uint8_t)(safe_left + 1), (uint8_t)(row2_y + 1), 6, 6);
     lcd_fb_draw_string5x7((uint8_t)(safe_left + 10), row2_y, "800000000000255304");
 
     /* 第4行位置显示原第3行内容 */
-    lcd_fb_draw_cn_string_lxjs((uint8_t)(safe_left + 2), row3_y);
+    lcd_fb_draw_cn12_string_lxjs((uint8_t)(safe_left + 2), row3_y);
     lcd_fb_draw_string5x7_scaled_right((uint8_t)(safe_right - 2), row3_y, "00:00:00", 1);
 
     lcd_fb_flush();
