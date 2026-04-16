@@ -57,9 +57,11 @@ typedef union {
 
 int app_can_init(void);
 int app_can_start(void);
-int app_can_send(rt_uint32_t id, const rt_uint8_t *data, rt_uint8_t len);
+int app_can_send(uint32_t id, const uint8_t *data, uint8_t len);
+int app_can_send_ex(uint8_t node_index, uint32_t id, const uint8_t *data, uint8_t len);
 rt_uint8_t app_can_get_life(uint8_t node_index);
 rt_bool_t app_can_is_online(uint8_t node_index);
+
 
 #ifdef __cplusplus
 }

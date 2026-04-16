@@ -6,5 +6,7 @@
 int svc_can_init(void);
 int svc_can_task_start(void);
 int svc_can_send(rt_uint32_t id, const rt_uint8_t *data, rt_uint8_t len);
+int svc_can_send_ex(rt_uint8_t node_index, rt_uint32_t id, const rt_uint8_t *data, rt_uint8_t len);
+
 
 #endif /* APPLICATIONS_SVC_CAN_H_ */

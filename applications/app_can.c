@@ -58,28 +58,17 @@ static void app_can_handle_rx(uint8_t node_index, const struct rt_can_msg *msg)
 
     node = &g_can_nodes[node_index];
 
-    LOG_I("CAN%u rx: id=0x%08lx len=%u data0=0x%02x",
-          (unsigned int)(node_index + 1U),
-          (unsigned long)msg->id,
-          (unsigned int)msg->len,
-          (unsigned int)msg->data[0]);
-
     if ((msg->id == APP_CAN_STD_LIFE_ID) || (msg->id == APP_CAN_EXT_LIFE_ID)) {
         node->life = msg->data[0];
         node->last_rx_ms = rt_tick_get_millisecond();
         node->online = RT_TRUE;
-
-        LOG_I("CAN%u life=%u online=1",
-              (unsigned int)(node_index + 1U),
-              (unsigned int)node->life);
     }
 }
-
 
 static rt_err_t app_can_rx_indicate_0(rt_device_t dev, rt_size_t size)
 {
     RT_UNUSED(dev);
-    APP_NON_CAN_LOG("can0 rx indicate, size=%u\r\n", (unsigned int)size);
+    RT_UNUSED(size);
 
     if (g_can_nodes[CAN_NODE1].rx_sem != RT_NULL) {
         rt_sem_release(g_can_nodes[CAN_NODE1].rx_sem);
@@ -90,7 +79,7 @@ static rt_err_t app_can_rx_indicate_0(rt_device_t dev, rt_size_t size)
 static rt_err_t app_can_rx_indicate_2(rt_device_t dev, rt_size_t size)
 {
     RT_UNUSED(dev);
-    APP_NON_CAN_LOG("can2 rx indicate, size=%u\r\n", (unsigned int)size);
+    RT_UNUSED(size);
 
     if (g_can_nodes[CAN_NODE2].rx_sem != RT_NULL) {
         rt_sem_release(g_can_nodes[CAN_NODE2].rx_sem);
@@ -101,7 +90,7 @@ static rt_err_t app_can_rx_indicate_2(rt_device_t dev, rt_size_t size)
 static rt_err_t app_can_rx_indicate_3(rt_device_t dev, rt_size_t size)
 {
     RT_UNUSED(dev);
-    APP_NON_CAN_LOG("can3 rx indicate, size=%u\r\n", (unsigned int)size);
+    RT_UNUSED(size);
 
     if (g_can_nodes[CAN_NODE3].rx_sem != RT_NULL) {
         rt_sem_release(g_can_nodes[CAN_NODE3].rx_sem);
@@ -109,13 +98,11 @@ static rt_err_t app_can_rx_indicate_3(rt_device_t dev, rt_size_t size)
     return RT_EOK;
 }
 
-
 static rt_err_t (* const g_can_rx_indicate[CAN_NODE_ALL])(rt_device_t dev, rt_size_t size) = {
     app_can_rx_indicate_0,
     app_can_rx_indicate_2,
     app_can_rx_indicate_3,
 };
-
 
 static void app_can_rx_thread(void *parameter)
 {
@@ -164,13 +151,10 @@ static void app_can_monitor_thread(void *parameter)
         uint8_t i;
 
         for (i = 0; i < CAN_NODE_ALL; i++) {
-            if (g_can_nodes[i].online == RT_TRUE) {
-                if ((now - g_can_nodes[i].last_rx_ms) >= APP_CAN_LIFE_TIMEOUT_MS) {
-                    g_can_nodes[i].online = RT_FALSE;
-                    g_can_nodes[i].life = 0U;
-                    LOG_W("CAN%u offline", (unsigned int)(i + 1U));
-                }
-
+            if ((g_can_nodes[i].online == RT_TRUE) &&
+                ((now - g_can_nodes[i].last_rx_ms) >= APP_CAN_LIFE_TIMEOUT_MS)) {
+                g_can_nodes[i].online = RT_FALSE;
+                g_can_nodes[i].life = 0U;
             }
         }
 
@@ -307,17 +291,20 @@ int app_can_start(void)
 
     rt_thread_startup(g_can_monitor_thread);
     g_can_started = RT_TRUE;
-    LOG_I("CAN started");
 
     return RT_EOK;
 }
 
-int app_can_send(rt_uint32_t id, const rt_uint8_t *data, rt_uint8_t len)
+int app_can_send_ex(uint8_t node_index, uint32_t id, const uint8_t *data, uint8_t len)
 {
     struct rt_can_msg msg;
 
-    if ((g_can_started == RT_FALSE) || (g_can_nodes[CAN_NODE1].dev == RT_NULL)) {
-        return -RT_ERROR;
+    if (node_index >= CAN_NODE_ALL) {
+        return -RT_EINVAL;
+    }
+
+    if (g_can_nodes[node_index].dev == RT_NULL) {
+        return -RT_ENOSYS;
     }
 
     if (len > 8U) {
@@ -329,15 +316,29 @@ int app_can_send(rt_uint32_t id, const rt_uint8_t *data, rt_uint8_t len)
     msg.ide = (id > 0x7FFU) ? RT_CAN_EXTID : RT_CAN_STDID;
     msg.rtr = RT_CAN_DTR;
     msg.len = len;
+
     if ((data != RT_NULL) && (len > 0U)) {
         memcpy(msg.data, data, len);
     }
 
-    if (rt_device_write(g_can_nodes[CAN_NODE1].dev, 0, &msg, sizeof(msg)) <= 0) {
+#ifdef RT_CAN_USING_HDR
+    msg.hdr_index = 0;
+#endif
+
+    if (rt_device_write(g_can_nodes[node_index].dev, 0, &msg, sizeof(msg)) <= 0) {
+        LOG_E("CAN%u tx failed: id=0x%08lx len=%u",
+              (unsigned int)(node_index + 1U),
+              (unsigned long)id,
+              (unsigned int)len);
         return -RT_ERROR;
     }
 
     return RT_EOK;
+}
+
+int app_can_send(uint32_t id, const uint8_t *data, uint8_t len)
+{
+    return app_can_send_ex(CAN_NODE1, id, data, len);
 }
 
 rt_uint8_t app_can_get_life(uint8_t node_index)
