@@ -83,8 +83,8 @@
 #define APP_ADC_CH_LI_BAT_4V2        3
 #define APP_ADC_CH_SUPER_C_5V        4
 #define APP_ADC_CH_KEY               11
-#define APP_ADC_SAMPLE_PERIOD_MS     1000
-#define APP_ADC_STARTUP_DELAY_MS     1000
+#define APP_ADC_SAMPLE_PERIOD_MS     10
+#define APP_ADC_STARTUP_DELAY_MS     500
 
 #define APP_ADC_FULL_SCALE           65535UL
 #define APP_ADC_VREF_MV              3300UL

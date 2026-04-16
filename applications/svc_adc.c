@@ -1,12 +1,26 @@
-#include <rtthread.h>
 #include <rtdevice.h>
 #include <drivers/adc.h>
 
 #include "app_config.h"
 #include "svc_adc.h"
 
-/* 保存 ADC 最近一次采样结果，便于后续其它模块读取。 */
 static app_adc_snapshot_t g_adc_snapshot;
+
+typedef enum
+{
+    ADC_KEY_NONE = 0,
+    ADC_KEY_S1,
+    ADC_KEY_S2,
+    ADC_KEY_S3,
+    ADC_KEY_S4,
+} adc_key_t;
+
+static adc_key_t g_adc_key_last = ADC_KEY_NONE;
+static adc_key_t g_adc_key_candidate = ADC_KEY_NONE;
+static uint8_t g_adc_key_confirm = 0;
+static rt_bool_t g_adc_s1_event = RT_FALSE;
+static rt_bool_t g_adc_s2_event = RT_FALSE;
+static rt_bool_t g_adc_s3_event = RT_FALSE;
 
 static rt_uint32_t svc_adc_raw_to_pin_mv(rt_uint32_t raw)
 {
@@ -32,6 +46,68 @@ static rt_uint32_t svc_adc_estimate_input_mv(rt_uint32_t raw,
     return (rt_uint32_t)input_mv;
 }
 
+static adc_key_t svc_adc_decode_key(void)
+{
+    rt_uint32_t raw = g_adc_snapshot.raw_key;
+
+    /* S1 */
+    if (raw <= 200U) {
+        return ADC_KEY_S1;
+    }
+
+    /* S2 */
+    if ((raw >= 17000U) && (raw <= 20000U)) {
+        return ADC_KEY_S2;
+    }
+
+    /* S3 */
+    if ((raw >= 28000U) && (raw <= 31000U)) {
+        return ADC_KEY_S3;
+    }
+
+    /* S4 */
+    if ((raw >= 46000U) && (raw <= 50000U)) {
+        return ADC_KEY_S4;
+    }
+
+    return ADC_KEY_NONE;
+}
+
+
+
+static void svc_adc_update_key_events(void)
+{
+    adc_key_t key_now = svc_adc_decode_key();
+
+//    APP_NON_CAN_LOG("KEY raw=%lu mv=%d key=%d\r\n",
+//                    g_adc_snapshot.raw_key,
+//                    g_adc_snapshot.mv_key,
+//                    key_now);
+
+
+    if (key_now == g_adc_key_candidate) {
+        if (g_adc_key_confirm < 2U) {
+            g_adc_key_confirm++;
+        }
+    } else {
+        g_adc_key_candidate = key_now;
+        g_adc_key_confirm = 0U;
+        return;
+    }
+
+    if ((g_adc_key_confirm >= 1U) && (key_now != g_adc_key_last)) {
+        g_adc_key_last = key_now;
+
+        if (key_now == ADC_KEY_S1) {
+            g_adc_s1_event = RT_TRUE;
+        } else if (key_now == ADC_KEY_S2) {
+            g_adc_s2_event = RT_TRUE;
+        } else if (key_now == ADC_KEY_S3) {
+            g_adc_s3_event = RT_TRUE;
+        }
+    }
+}
+
 static void svc_adc_sample_update(rt_adc_device_t adc_dev)
 {
     g_adc_snapshot.raw_bat24 = rt_adc_read(adc_dev, APP_ADC_CH_BAT_24V);
@@ -47,11 +123,12 @@ static void svc_adc_sample_update(rt_adc_device_t adc_dev)
                                                              APP_ADC_LI_BAT_DIV_DOWN_KOHM);
     g_adc_snapshot.est_super_c_mv = svc_adc_raw_to_pin_mv(g_adc_snapshot.raw_super_c);
 
-    /* 保留原有接口字段，后续可继续用于校验 BSP 提供的电压换算能力。 */
     g_adc_snapshot.mv_bat24 = rt_adc_voltage(adc_dev, APP_ADC_CH_BAT_24V);
     g_adc_snapshot.mv_li_bat = rt_adc_voltage(adc_dev, APP_ADC_CH_LI_BAT_4V2);
     g_adc_snapshot.mv_super_c = rt_adc_voltage(adc_dev, APP_ADC_CH_SUPER_C_5V);
     g_adc_snapshot.mv_key = rt_adc_voltage(adc_dev, APP_ADC_CH_KEY);
+
+    svc_adc_update_key_events();
 }
 
 static int svc_adc_channel_enable(rt_adc_device_t adc_dev)
@@ -108,25 +185,19 @@ static void svc_adc_thread_entry(void *arg)
     while (1)
     {
         svc_adc_sample_update(adc_dev);
-
-        /* 当前重点观察主电、超级电容和锂电的原始值及估算电压。 */
-//        APP_NON_CAN_LOG("ADC: BAT24 raw=%lu est=%lumV SUPER5V raw=%lu est=%lumV LI4V2 raw=%lu est=%lumV KEY=%lu\r\n",
-//                        g_adc_snapshot.raw_bat24,
-//                        g_adc_snapshot.est_bat24_mv,
-//                        g_adc_snapshot.raw_super_c,
-//                        g_adc_snapshot.est_super_c_mv,
-//                        g_adc_snapshot.raw_li_bat,
-//                        g_adc_snapshot.est_li_bat_mv,
-//                        g_adc_snapshot.raw_key);
-
         rt_thread_mdelay(APP_ADC_SAMPLE_PERIOD_MS);
     }
 }
 
 int svc_adc_init(void)
 {
-    /* 当前阶段没有硬件预初始化动作，保留统一服务初始化入口。 */
     rt_memset(&g_adc_snapshot, 0, sizeof(g_adc_snapshot));
+    g_adc_key_last = ADC_KEY_NONE;
+    g_adc_key_candidate = ADC_KEY_NONE;
+    g_adc_key_confirm = 0U;
+    g_adc_s1_event = RT_FALSE;
+    g_adc_s2_event = RT_FALSE;
+    g_adc_s3_event = RT_FALSE;
     return RT_EOK;
 }
 
@@ -153,4 +224,25 @@ int svc_adc_task_start(void)
 const app_adc_snapshot_t *svc_adc_get_snapshot(void)
 {
     return &g_adc_snapshot;
+}
+
+rt_bool_t svc_adc_consume_s1_event(void)
+{
+    rt_bool_t event = g_adc_s1_event;
+    g_adc_s1_event = RT_FALSE;
+    return event;
+}
+
+rt_bool_t svc_adc_consume_s2_event(void)
+{
+    rt_bool_t event = g_adc_s2_event;
+    g_adc_s2_event = RT_FALSE;
+    return event;
+}
+
+rt_bool_t svc_adc_consume_s3_event(void)
+{
+    rt_bool_t event = g_adc_s3_event;
+    g_adc_s3_event = RT_FALSE;
+    return event;
 }

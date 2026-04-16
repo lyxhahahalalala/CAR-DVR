@@ -95,7 +95,8 @@ applications/svc_lcd.o: ../applications/svc_lcd.c \
  D:\Users\lyx\project\0407_CARDVR\1\hpm6200SDKv1.10_tachographs_isok\libraries\hpm_sdk\soc\HPM6200\HPM6280/hpm_gpiom_soc_drv.h \
  D:\Users\lyx\project\0407_CARDVR\1\hpm6200SDKv1.10_tachographs_isok\libraries\hpm_sdk\drivers\inc/hpm_gpio_drv.h \
  D:\Users\lyx\project\0407_CARDVR\1\hpm6200SDKv1.10_tachographs_isok\libraries\hpm_sdk\drivers\inc/hpm_spi_drv.h \
- ../applications/app_config.h ../applications/svc_lcd.h
+ ../applications/app_config.h ../applications/svc_lcd.h \
+ ../applications/svc_adc.h ../applications/app_types.h
 D:\Users\lyx\project\0407_CARDVR\1\hpm6200SDKv1.10_tachographs_isok\rtconfig_preinc.h:
 D:\Users\lyx\project\0407_CARDVR\1\hpm6200SDKv1.10_tachographs_isok\rt-thread\include/rtthread.h:
 D:\Users\lyx\project\0407_CARDVR\1\hpm6200SDKv1.10_tachographs_isok/rtconfig.h:
@@ -194,3 +195,5 @@ D:\Users\lyx\project\0407_CARDVR\1\hpm6200SDKv1.10_tachographs_isok\libraries\hp
 D:\Users\lyx\project\0407_CARDVR\1\hpm6200SDKv1.10_tachographs_isok\libraries\hpm_sdk\drivers\inc/hpm_spi_drv.h:
 ../applications/app_config.h:
 ../applications/svc_lcd.h:
+../applications/svc_adc.h:
+../applications/app_types.h:
