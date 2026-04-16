@@ -1,5 +1,5 @@
-#include "app_can.h"
 #include "svc_can.h"
+#include "app_can.h"
 
 int svc_can_init(void)
 {
