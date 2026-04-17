@@ -20,3 +20,6 @@ int svc_can_send_ex(rt_uint8_t node_index, rt_uint32_t id, const rt_uint8_t *dat
 {
     return app_can_send_ex(node_index, id, data, len);
 }
+
+
+

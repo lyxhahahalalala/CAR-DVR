@@ -31,10 +31,23 @@ typedef struct
 {
     rt_uint8_t wk_acc;
     rt_uint8_t wk_on;
+
+    rt_uint8_t sw_kl1;
+    rt_uint8_t sw_kl2;
+    rt_uint8_t sw_kl3;
+    rt_uint8_t sw_kl4;
+    rt_uint8_t sw_kl5;
+    rt_uint8_t sw_kl6;
+    rt_uint8_t sw_kl7;
+    rt_uint8_t sw_kl8;
+    rt_uint8_t sw_kl9;
+    rt_uint8_t sw_kl10;
+
     rt_uint8_t li_bat_stdby;
     rt_uint8_t li_bat_chrg;
     rt_uint32_t li_bat_raw;
     rt_uint32_t li_bat_est_mv;
 } app_vehicle_io_state_t;
+
 
 #endif /* APPLICATIONS_APP_TYPES_H_ */
