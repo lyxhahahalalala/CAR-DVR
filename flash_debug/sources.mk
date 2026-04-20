@@ -32,6 +32,7 @@ libraries/hpm_sdk/soc/HPM6200/HPM6280 \
 libraries/hpm_sdk/utils \
 libraries/misc/rtt_interrupt_util \
 libraries/misc/rtt_os_tick \
+packages/u8g2-official-latest/csrc \
 rt-thread/components/drivers/can \
 rt-thread/components/drivers/core \
 rt-thread/components/drivers/hwtimer \

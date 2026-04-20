@@ -18,4 +18,15 @@ void lcd_csn_set(rt_bool_t active);
 void lcd_clear(void);      /* 清屏（DDRAM 全 0）*/
 void lcd_fill_all(void);   /* 全亮（DDRAM 全 0xFF）*/
 
+
+void lcd_rst_set(rt_bool_t active);
+void lcd_spi_send_byte(uint8_t byte);
+
+void lcd_fb_public_clear(void);
+void lcd_fb_public_set_pixel(uint8_t x, uint8_t y, rt_bool_t on);
+void lcd_fb_public_flush(void);
+void lcd_fb_public_copy_pages(const uint8_t *src, uint16_t src_stride);
+
+
+
 #endif /* APPLICATIONS_SVC_LCD_H_ */
