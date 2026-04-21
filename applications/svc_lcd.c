@@ -107,6 +107,34 @@ static uint8_t g_lcd_fb[LCD_PAGES][LCD_COLS];
 #define LCD_FONT_ASCII_SMALL    u8g2_font_6x10_tf
 #define LCD_FONT_CN_12          u8g2_font_wqy12_t_gb2312
 
+
+typedef struct
+{
+    uint16_t speed_kmh;
+    uint8_t hour;
+    uint8_t minute;
+    uint8_t second;
+    uint8_t drive_hour;
+    uint8_t drive_minute;
+    uint8_t drive_second;
+    char card_id[20];
+} lcd_home_ui_data_t;
+
+static lcd_home_ui_data_t g_lcd_home_ui = {
+    .speed_kmh = 0U,
+    .hour = 9U,
+    .minute = 16U,
+    .second = 45U,
+    .drive_hour = 0U,
+    .drive_minute = 0U,
+    .drive_second = 0U,
+    .card_id = "800000000000255304"
+};
+
+char speed_str[16];
+char time_str[16];
+char drive_time_str[16];
+
 static const uint8_t g_icon_signal_12x12[24] = {
     0x00,0x00,0x00,0xe0,0x3e,0xe0,0x1e,0xc0,
     0x0c,0xc2,0x0c,0xc3,0x8c,0xc3,0xcc,0xc3,
@@ -597,6 +625,69 @@ static void lcd_render_menu_ui(void)
 }
 
 
+static rt_bool_t lcd_home_ui_set_data(uint16_t speed_kmh,
+                                      uint8_t hour,
+                                      uint8_t minute,
+                                      uint8_t second,
+                                      uint8_t drive_hour,
+                                      uint8_t drive_minute,
+                                      uint8_t drive_second,
+                                      const char *card_id)
+{
+    rt_bool_t changed = RT_FALSE;
+
+    if (g_lcd_home_ui.speed_kmh != speed_kmh) {
+        g_lcd_home_ui.speed_kmh = speed_kmh;
+        changed = RT_TRUE;
+    }
+
+    if (g_lcd_home_ui.hour != hour) {
+        g_lcd_home_ui.hour = hour;
+        changed = RT_TRUE;
+    }
+
+    if (g_lcd_home_ui.minute != minute) {
+        g_lcd_home_ui.minute = minute;
+        changed = RT_TRUE;
+    }
+
+    if (g_lcd_home_ui.second != second) {
+        g_lcd_home_ui.second = second;
+        changed = RT_TRUE;
+    }
+
+    if (g_lcd_home_ui.drive_hour != drive_hour) {
+        g_lcd_home_ui.drive_hour = drive_hour;
+        changed = RT_TRUE;
+    }
+
+    if (g_lcd_home_ui.drive_minute != drive_minute) {
+        g_lcd_home_ui.drive_minute = drive_minute;
+        changed = RT_TRUE;
+    }
+
+    if (g_lcd_home_ui.drive_second != drive_second) {
+        g_lcd_home_ui.drive_second = drive_second;
+        changed = RT_TRUE;
+    }
+
+    if (card_id != RT_NULL) {
+        if (rt_strncmp(g_lcd_home_ui.card_id, card_id, sizeof(g_lcd_home_ui.card_id)) != 0) {
+            rt_strncpy(g_lcd_home_ui.card_id, card_id, sizeof(g_lcd_home_ui.card_id) - 1);
+            g_lcd_home_ui.card_id[sizeof(g_lcd_home_ui.card_id) - 1] = '\0';
+            changed = RT_TRUE;
+        }
+    }
+
+    if ((changed == RT_TRUE) && (g_lcd_menu_mode == RT_FALSE)) {
+        g_lcd_need_redraw = RT_TRUE;
+    }
+
+    return changed;
+}
+
+
+
 
 
 
@@ -681,6 +772,80 @@ static void lcd_u8g2_draw_top_icons(u8g2_t *u8g2, uint8_t x, uint8_t y)
 
 
 
+
+static void lcd_home_ui_test_update_every_second(void)
+{
+    static rt_tick_t last_tick = 0;
+    static uint16_t speed_kmh = 0U;
+    static uint8_t hour = 9U;
+    static uint8_t minute = 16U;
+    static uint8_t second = 45U;
+    static uint8_t drive_hour = 0U;
+    static uint8_t drive_minute = 0U;
+    static uint8_t drive_second = 0U;
+    static char card_id[20] = "800000000000255304";
+
+    rt_tick_t now_tick;
+    uint32_t card_num = 0;
+    int i;
+
+    now_tick = rt_tick_get();
+    if ((last_tick != 0) && ((now_tick - last_tick) < RT_TICK_PER_SECOND)) {
+        return;
+    }
+    last_tick = now_tick;
+
+    speed_kmh++;
+
+    second++;
+    if (second >= 60U) {
+        second = 0U;
+        minute++;
+        if (minute >= 60U) {
+            minute = 0U;
+            hour++;
+            if (hour >= 24U) {
+                hour = 0U;
+            }
+        }
+    }
+
+    drive_second++;
+    if (drive_second >= 60U) {
+        drive_second = 0U;
+        drive_minute++;
+        if (drive_minute >= 60U) {
+            drive_minute = 0U;
+            drive_hour++;
+            if (drive_hour >= 100U) {
+                drive_hour = 0U;
+            }
+        }
+    }
+
+    for (i = 0; i < 18 && card_id[i] != '\0'; i++) {
+        if ((card_id[i] < '0') || (card_id[i] > '9')) {
+            break;
+        }
+        card_num = card_num * 10U + (uint32_t)(card_id[i] - '0');
+    }
+
+    card_num++;
+    rt_snprintf(card_id, sizeof(card_id), "%018lu", (unsigned long)card_num);
+
+    lcd_home_ui_set_data(speed_kmh,
+                         hour,
+                         minute,
+                         second,
+                         drive_hour,
+                         drive_minute,
+                         drive_second,
+                         card_id);
+}
+
+
+
+
 /*u8g2库的UI主界面*/
 /* Home screen rendered with u8g2 resources. */
 static void lcd_render_home_ui(void)
@@ -700,6 +865,24 @@ static void lcd_render_home_ui(void)
 
     u8g2_port_clear_buffer();
 
+
+
+    rt_snprintf(speed_str, sizeof(speed_str), "%u km/h",
+                (unsigned int)g_lcd_home_ui.speed_kmh);
+
+    rt_snprintf(time_str, sizeof(time_str), "%02u:%02u:%02u",
+                (unsigned int)g_lcd_home_ui.hour,
+                (unsigned int)g_lcd_home_ui.minute,
+                (unsigned int)g_lcd_home_ui.second);
+
+    rt_snprintf(drive_time_str, sizeof(drive_time_str), "%02u:%02u:%02u",
+                (unsigned int)g_lcd_home_ui.drive_hour,
+                (unsigned int)g_lcd_home_ui.drive_minute,
+                (unsigned int)g_lcd_home_ui.drive_second);
+
+
+
+
     u8g2_SetFontMode(u8g2, 1);
     u8g2_SetDrawColor(u8g2, 1);
 
@@ -708,21 +891,21 @@ static void lcd_render_home_ui(void)
 
     /* 第2行：速度 + 时间 */
     u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
-    u8g2_DrawStr(u8g2, 10, 24, "0 km/h");
-    u8g2_DrawStr(u8g2, 72, 24, "09:16:45");
+    u8g2_DrawStr(u8g2, 10, 24, speed_str);
+    u8g2_DrawStr(u8g2, 72, 24, time_str);
 
     /* 第3行：连续驾驶 + 时长 */
     u8g2_SetFont(u8g2, LCD_FONT_CN_12);
     lcd_u8g2_draw_unicode_seq(u8g2, 8, 40, g_cn_lxjs, 4);
 
     u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
-    u8g2_DrawStr(u8g2, 72, 40, "00:00:00");
+    u8g2_DrawStr(u8g2, 72, 40, drive_time_str);
 
     /* 第4行：黑块 + ID */
     u8g2_DrawBox(u8g2, 2, 50, 6, 8);
 
     u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
-    u8g2_DrawStr(u8g2, 12, 58, "800000000000255304");
+    u8g2_DrawStr(u8g2, 12, 58, g_lcd_home_ui.card_id);
 
     u8g2_port_flush_buffer();
 }
@@ -825,6 +1008,7 @@ static void svc_lcd_thread_entry(void *arg)
 
         while (1)
            {
+            lcd_home_ui_test_update_every_second();
                if (svc_adc_consume_s1_event() == RT_TRUE) {
                    if (g_lcd_menu_mode == RT_FALSE) {
                        g_lcd_menu_mode = RT_TRUE;
