@@ -260,6 +260,53 @@ static const uint8_t *lcd_font5x7_get(char ch)
     }
 }
 
+static const uint16_t g_menu_title_u8g2[] = {
+    0x83DC, /* 菜 */
+    0x5355  /* 单 */
+};
+
+static const uint16_t g_menu_item_text_1[] = {
+    0x884C, 0x9A76, 0x8BB0, 0x5F55 /* 行驶记录 */
+};
+
+static const uint16_t g_menu_item_text_2[] = {
+    0x8BBE, 0x5907, 0x72B6, 0x6001 /* 设备状态 */
+};
+
+static const uint16_t g_menu_item_text_3[] = {
+    0x7CFB, 0x7EDF, 0x8BBE, 0x7F6E /* 系统设置 */
+};
+
+static const uint16_t g_menu_item_text_4[] = {
+    0x5B9A, 0x4F4D, 0x6A21, 0x5757, 0x72B6, 0x6001 /* 定位模块状态 */
+};
+
+static const uint16_t g_menu_item_text_5[] = {
+    0x6574, 0x8F66, 0x72B6, 0x6001 /* 整车状态 */
+};
+
+static const uint16_t g_menu_item_text_6[] = {
+    0x5B58, 0x50A8, 0x5668, 0x68C0, 0x6D4B /* 存储器检测 */
+};
+
+static const uint16_t g_menu_item_text_7[] = {
+    0x5F55, 0x97F3, 0x5F55, 0x50CF, 0x68C0, 0x6D4B /* 录音录像检测 */
+};
+
+static const uint16_t *const g_menu_item_texts_u8g2[] = {
+    g_menu_item_text_1,
+    g_menu_item_text_2,
+    g_menu_item_text_3,
+    g_menu_item_text_4,
+    g_menu_item_text_5,
+    g_menu_item_text_6,
+    g_menu_item_text_7
+};
+
+static const uint8_t g_menu_item_text_counts_u8g2[] = {4, 4, 4, 6, 4, 5, 6};
+
+
+
 static void svc_lcd_spi_hw_init(void)
 {
     HPM_IOC->PAD[IOC_PAD_PA30].FUNC_CTL = IOC_PA30_FUNC_CTL_GPIO_A_30;
@@ -732,49 +779,110 @@ void lcd_fb_public_copy_pages(const uint8_t *src, uint16_t src_stride)
     }
 }
 
+static uint16_t lcd_u8g2_draw_unicode_seq(u8g2_t *u8g2,
+                                          uint16_t x,
+                                          uint16_t y,
+                                          const uint16_t *codes,
+                                          uint8_t count)
+{
+    uint8_t i;
 
+    for (i = 0; i < count; i++) {
+        x += u8g2_DrawGlyph(u8g2, x, y, codes[i]);
+    }
+
+    return x;
+}
+
+static void lcd_u8g2_draw_menu_item(u8g2_t *u8g2,
+                                    uint8_t index,
+                                    uint8_t baseline_y,
+                                    rt_bool_t selected)
+{
+    char prefix[4];
+
+    if (selected == RT_TRUE) {
+        u8g2_SetDrawColor(u8g2, 1);
+        u8g2_DrawBox(u8g2, 0, (uint8_t)(baseline_y - 11U), LCD_COLS, 13);
+        u8g2_SetDrawColor(u8g2, 0);
+    } else {
+        u8g2_SetDrawColor(u8g2, 1);
+    }
+
+    rt_snprintf(prefix, sizeof(prefix), "%u.", (unsigned int)(index + 1U));
+
+    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+    u8g2_DrawStr(u8g2, 2, baseline_y, prefix);
+
+    u8g2_SetFont(u8g2, u8g2_font_wqy12_t_gb2312);
+    lcd_u8g2_draw_unicode_seq(u8g2,
+                              16,
+                              baseline_y,
+                              g_menu_item_texts_u8g2[index],
+                              g_menu_item_text_counts_u8g2[index]);
+
+    u8g2_SetDrawColor(u8g2, 1);
+}
 
 
 
 static void lcd_render_menu_ui(void)
 {
+    u8g2_t *u8g2;
     uint8_t page_start;
     uint8_t row_count;
+    uint8_t row_y[4];
+    uint8_t row;
 
-    lcd_fb_clear();
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
 
     if (g_lcd_menu_index < 3U) {
         page_start = 0U;
         row_count = 3U;
-        lcd_fb_draw_glyph_seq12x12(0, g_menu_vis_y[0], (const uint8_t *)g_menu_title, 2, RT_TRUE);
+
+        row_y[0] = 28U;
+        row_y[1] = 42U;
+        row_y[2] = 56U;
+
+        u8g2_SetFont(u8g2, u8g2_font_wqy12_t_gb2312);
+        lcd_u8g2_draw_unicode_seq(u8g2, 2, 12, g_menu_title_u8g2, 2);
+
+        for (row = 0; row < row_count; row++) {
+            uint8_t item_index = (uint8_t)(page_start + row);
+            lcd_u8g2_draw_menu_item(u8g2,
+                                    item_index,
+                                    row_y[row],
+                                    (item_index == g_lcd_menu_index) ? RT_TRUE : RT_FALSE);
+        }
     } else {
         page_start = 3U;
         row_count = 4U;
-    }
 
-    for (uint8_t row = 0; row < row_count; row++) {
-        uint8_t item_index = (uint8_t)(page_start + row);
-        uint8_t y = g_menu_vis_y[(g_lcd_menu_index < 3U) ? (row + 1U) : row];
+        row_y[0] = 14U;
+        row_y[1] = 28U;
+        row_y[2] = 42U;
+        row_y[3] = 56U;
 
-        if (item_index == g_lcd_menu_index) {
-            lcd_fb_fill_band12x12(0, y, lcd_menu_item_width(item_index));
-            lcd_fb_draw_glyph_seq12x12(2,
-                                       y,
-                                       g_menu_items[item_index],
-                                       g_menu_item_glyph_counts[item_index],
-                                       RT_FALSE);
-        } else {
-
-            lcd_fb_draw_glyph_seq12x12(2,
-                                       y,
-                                       g_menu_items[item_index],
-                                       g_menu_item_glyph_counts[item_index],
-                                       RT_TRUE);
+        for (row = 0; row < row_count; row++) {
+            uint8_t item_index = (uint8_t)(page_start + row);
+            lcd_u8g2_draw_menu_item(u8g2,
+                                    item_index,
+                                    row_y[row],
+                                    (item_index == g_lcd_menu_index) ? RT_TRUE : RT_FALSE);
         }
     }
 
-    lcd_fb_flush();
+    u8g2_port_flush_buffer();
 }
+
 
 
 
@@ -803,20 +911,7 @@ static void lcd_fb_flush(void)
     }
 }
 
-static uint16_t lcd_u8g2_draw_unicode_seq(u8g2_t *u8g2,
-                                          uint16_t x,
-                                          uint16_t y,
-                                          const uint16_t *codes,
-                                          uint8_t count)
-{
-    uint8_t i;
 
-    for (i = 0; i < count; i++) {
-        x += u8g2_DrawGlyph(u8g2, x, y, codes[i]);
-    }
-
-    return x;
-}
 
 static void lcd_u8g2_draw_bitmap12x12(u8g2_t *u8g2,
                                       uint8_t x,
@@ -855,7 +950,7 @@ static void lcd_u8g2_draw_top_icons(u8g2_t *u8g2, uint8_t x, uint8_t y)
 }
 
 
-
+/*字模版的主界面UI*/
 //static void lcd_render_home_ui(void)
 //{
 //    uint8_t safe_left = 0;
@@ -887,9 +982,9 @@ static void lcd_u8g2_draw_top_icons(u8g2_t *u8g2, uint8_t x, uint8_t y)
 //    lcd_fb_flush();
 //}
 
+
+
 /*u8g2库的UI主界面*/
-
-
 static void lcd_render_home_ui(void)
 {
     u8g2_t *u8g2;
@@ -926,7 +1021,7 @@ static void lcd_render_home_ui(void)
     u8g2_DrawStr(u8g2, 72, 40, "00:00:00");
 
     /* 第4行：黑块 + ID */
-    u8g2_DrawBox(u8g2, 2, 47, 6, 8);
+    u8g2_DrawBox(u8g2, 2, 50, 6, 8);
 
     u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
     u8g2_DrawStr(u8g2, 12, 58, "800000000000255304");
@@ -977,77 +1072,77 @@ int svc_lcd_init(void)
 
 
 
-//static void svc_lcd_thread_entry(void *arg)
-//{
-//    RT_UNUSED(arg);
-//
-//    lcd_backlight_on();
-//
-//    g_lcd_menu_mode = RT_FALSE;
-//    g_lcd_menu_index = 0U;
-//    g_lcd_need_redraw = RT_TRUE;
-//
-//    //lcd_render_home_ui();
-//    //g_lcd_need_redraw = RT_FALSE;
-//    APP_NON_CAN_LOG("LCD: ui thread start\r\n");
-//
-//    rt_thread_mdelay(APP_ADC_STARTUP_DELAY_MS + 100);
-//
-//    while (1)
-//    {
-//        if (svc_adc_consume_s1_event() == RT_TRUE) {
-//            if (g_lcd_menu_mode == RT_FALSE) {
-//                g_lcd_menu_mode = RT_TRUE;
-//                g_lcd_menu_index = 0U;
-//            } else {
-//                g_lcd_menu_mode = RT_FALSE;
-//            }
-//            g_lcd_need_redraw = RT_TRUE;
-//        }
-//
-//
-//        if (g_lcd_menu_mode == RT_TRUE) {
-//            if (svc_adc_consume_s2_event() == RT_TRUE) {
-//                if (g_lcd_menu_index > 0U) {
-//                    g_lcd_menu_index--;
-//                    g_lcd_need_redraw = RT_TRUE;
-//                }
-//            }
-//
-//            if (svc_adc_consume_s3_event() == RT_TRUE) {
-//                if (g_lcd_menu_index < 6U) {
-//                    g_lcd_menu_index++;
-//                    g_lcd_need_redraw = RT_TRUE;
-//                }
-//            }
-//        }
-//
-//        if (g_lcd_need_redraw == RT_TRUE) {
-//            if (g_lcd_menu_mode == RT_TRUE) {
-//                lcd_render_menu_ui();
-//            } else {
-//                lcd_render_home_ui();
-//            }
-//            g_lcd_need_redraw = RT_FALSE;
-//        }
-//
-//        rt_thread_mdelay(10);
-//    }
-//}
-
-
 static void svc_lcd_thread_entry(void *arg)
 {
     RT_UNUSED(arg);
 
     lcd_backlight_on();
-    /* 初始化显示主界面 */
-        lcd_render_home_ui();
+
+    g_lcd_menu_mode = RT_FALSE;
+    g_lcd_menu_index = 0U;
+    g_lcd_need_redraw = RT_TRUE;
+
+    //lcd_render_home_ui();
+    //g_lcd_need_redraw = RT_FALSE;
+    APP_NON_CAN_LOG("LCD: ui thread start\r\n");
+
+    rt_thread_mdelay(APP_ADC_STARTUP_DELAY_MS + 100);
+
     while (1)
     {
-        rt_thread_mdelay(1000);
+        if (svc_adc_consume_s1_event() == RT_TRUE) {
+            if (g_lcd_menu_mode == RT_FALSE) {
+                g_lcd_menu_mode = RT_TRUE;
+                g_lcd_menu_index = 0U;
+            } else {
+                g_lcd_menu_mode = RT_FALSE;
+            }
+            g_lcd_need_redraw = RT_TRUE;
+        }
+
+
+        if (g_lcd_menu_mode == RT_TRUE) {
+            if (svc_adc_consume_s2_event() == RT_TRUE) {
+                if (g_lcd_menu_index > 0U) {
+                    g_lcd_menu_index--;
+                    g_lcd_need_redraw = RT_TRUE;
+                }
+            }
+
+            if (svc_adc_consume_s3_event() == RT_TRUE) {
+                if (g_lcd_menu_index < 6U) {
+                    g_lcd_menu_index++;
+                    g_lcd_need_redraw = RT_TRUE;
+                }
+            }
+        }
+
+        if (g_lcd_need_redraw == RT_TRUE) {
+            if (g_lcd_menu_mode == RT_TRUE) {
+                lcd_render_menu_ui();
+            } else {
+                lcd_render_home_ui();
+            }
+            g_lcd_need_redraw = RT_FALSE;
+        }
+
+        rt_thread_mdelay(10);
     }
 }
+
+
+//static void svc_lcd_thread_entry(void *arg)
+//{
+//    RT_UNUSED(arg);
+//
+//    lcd_backlight_on();
+//    /* 初始化显示主界面 */
+//        lcd_render_home_ui();
+//    while (1)
+//    {
+//        rt_thread_mdelay(1000);
+//    }
+//}
 
 
 
