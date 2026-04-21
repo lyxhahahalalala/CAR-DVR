@@ -853,6 +853,10 @@ static void lcd_render_home_ui(void)
 
     lcd_fb_clear();
 
+    //lcd_fb_clear()
+
+
+
     /* 第0行：顶部状态图标 + "05" */
     lcd_fb_draw_top_icons_12x12(safe_left, top_y);
     lcd_fb_draw_string5x7((uint8_t)(safe_left + 50), (uint8_t)(top_y + 4), "05");

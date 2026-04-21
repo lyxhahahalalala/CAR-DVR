@@ -115,6 +115,9 @@ void u8g2_port_init(void)
 
 
 
+
+
+
 //void u8g2_port_test_draw(void)
 //{
 //    u8g2_ClearBuffer(&g_u8g2);
