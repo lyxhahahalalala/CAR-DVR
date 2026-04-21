@@ -16,6 +16,7 @@ C_SRCS += \
 ../applications/svc_storage.c \
 ../applications/svc_vehicle_io.c \
 ../applications/test.c \
+../applications/u8g2_font_wqy12_t_gb2312.c \
 ../applications/u8g2_port.c 
 
 OBJS += \
@@ -31,6 +32,7 @@ OBJS += \
 ./applications/svc_storage.o \
 ./applications/svc_vehicle_io.o \
 ./applications/test.o \
+./applications/u8g2_font_wqy12_t_gb2312.o \
 ./applications/u8g2_port.o 
 
 C_DEPS += \
@@ -46,6 +48,7 @@ C_DEPS += \
 ./applications/svc_storage.d \
 ./applications/svc_vehicle_io.d \
 ./applications/test.d \
+./applications/u8g2_font_wqy12_t_gb2312.d \
 ./applications/u8g2_port.d 
 
 

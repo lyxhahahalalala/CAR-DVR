@@ -7,8 +7,8 @@ int main(void)
 {
     app_framework_init();
 
-    u8g2_port_init();
-    u8g2_port_test_draw();
+    //u8g2_port_init();
+    //u8g2_port_test_draw();
 
     app_task_start();
 

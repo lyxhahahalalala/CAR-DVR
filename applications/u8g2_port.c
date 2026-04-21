@@ -32,9 +32,10 @@ static uint8_t u8x8_byte_st7567_bb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, v
             lcd_spi_send_byte(*data++);
         }
         return 1;
-
     }
 
+    RT_UNUSED(u8x8);
+    RT_UNUSED(arg_ptr);
     return 0;
 }
 
@@ -60,26 +61,12 @@ static uint8_t u8x8_gpio_and_delay_st7567(u8x8_t *u8x8, uint8_t msg, uint8_t arg
     case U8X8_MSG_GPIO_CS:
         lcd_csn_set(arg_int ? RT_TRUE : RT_FALSE);
         return 1;
-
     }
 
+    RT_UNUSED(u8x8);
+    RT_UNUSED(arg_ptr);
     return 0;
 }
-
-//static void u8g2_copy_to_lcd_fb(void)
-//{
-//    uint8_t *buf;
-//    uint16_t page_stride;
-//
-//    buf = u8g2_GetBufferPtr(&g_u8g2);
-//
-//    /* u8g2 的 132x64 buffer 按 tile 宽度对齐到 17*8=136 字节每页 */
-//    page_stride = (uint16_t)(u8g2_GetBufferTileWidth(&g_u8g2) * 8U);
-//
-//    lcd_fb_public_clear();
-//    lcd_fb_public_copy_pages(buf, page_stride);
-//    lcd_fb_public_flush();
-//}
 
 static void u8g2_copy_to_lcd_fb(void)
 {
@@ -94,8 +81,6 @@ static void u8g2_copy_to_lcd_fb(void)
     lcd_fb_public_flush();
 }
 
-
-
 void u8g2_port_init(void)
 {
     u8g2_Setup_st7567_pi_132x64_f(
@@ -107,53 +92,31 @@ void u8g2_port_init(void)
 //    u8g2_InitDisplay(&g_u8g2);
 //    u8g2_SetPowerSave(&g_u8g2, 0);
 //
-//    /* 先沿用当前屏已经验证过的扫描方向 */
-//    u8x8_SendF(&g_u8g2.u8x8, "c", 0xA0); /* SEG_NORMAL */
-//    u8x8_SendF(&g_u8g2.u8x8, "c", 0xC0); /* COM_NORMAL */
+//    u8g2_ClearBuffer(&g_u8g2);
+//    u8g2_copy_to_lcd_fb();
 }
 
+void u8g2_port_clear_buffer(void)
+{
+    u8g2_ClearBuffer(&g_u8g2);
+}
 
+void u8g2_port_flush_buffer(void)
+{
+    u8g2_copy_to_lcd_fb();
+}
 
-
-
-
-
-//void u8g2_port_test_draw(void)
-//{
-//    u8g2_ClearBuffer(&g_u8g2);
-//    u8g2_SetFont(&g_u8g2, u8g2_font_6x10_tf);
-//    u8g2_DrawFrame(&g_u8g2, 0, 0, 132, 64);
-//    u8g2_DrawStr(&g_u8g2, 2, 12, "HELLO");
-//
-//    u8g2_copy_to_lcd_fb();
-//}
-
-//void u8g2_port_test_draw(void)
-//{
-//    u8g2_ClearBuffer(&g_u8g2);
-//
-//    /* 绘制边框：距离屏幕边缘 2 像素，组成四周的框 */
-//    u8g2_DrawFrame(&g_u8g2, 2, 2, 127, 59);  // x=2, y=2, 宽=127, 高=59
-//
-//    /* HELLO 在左上角 */
-//    u8g2_SetFont(&g_u8g2, u8g2_font_6x10_tf);
-//    u8g2_DrawStr(&g_u8g2, 4, 12, "HELLO");
-//
-//    u8g2_copy_to_lcd_fb();
-//}
 void u8g2_port_test_draw(void)
 {
     uint8_t i, j;
 
     u8g2_ClearBuffer(&g_u8g2);
-
     u8g2_SetFont(&g_u8g2, u8g2_font_6x10_tf);
 
-    /* 从上到下，第 i 行画 i+1 个 F */
     for (i = 0; i < 8; i++) {
-        uint8_t y = (uint8_t)(i * 8U + 10);  // y 坐标，每行8像素，+10是字体基线偏移
-        for (j = 0; j <= i; j++) {           // 画 i+1 个 F
-            uint8_t x = (uint8_t)(j * 8U);   // x 坐标，每个F占8像素
+        uint8_t y = (uint8_t)(i * 8U + 10U);
+        for (j = 0; j <= i; j++) {
+            uint8_t x = (uint8_t)(j * 8U);
             u8g2_DrawStr(&g_u8g2, x, y, "F");
         }
     }
@@ -161,11 +124,7 @@ void u8g2_port_test_draw(void)
     u8g2_copy_to_lcd_fb();
 }
 
-
-
-
 u8g2_t *u8g2_port_get(void)
 {
     return &g_u8g2;
 }
-

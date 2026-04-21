@@ -7,4 +7,7 @@ void u8g2_port_init(void);
 void u8g2_port_test_draw(void);
 u8g2_t *u8g2_port_get(void);
 
+void u8g2_port_clear_buffer(void);
+void u8g2_port_flush_buffer(void);
+
 #endif

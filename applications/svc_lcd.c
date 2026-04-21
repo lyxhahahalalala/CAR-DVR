@@ -8,6 +8,7 @@
 #include "app_config.h"
 #include "svc_lcd.h"
 #include "svc_adc.h"
+#include "u8g2_port.h"
 
 /*
  * LCD 相关控制脚，按当前已打通的连线整理如下：
@@ -802,6 +803,56 @@ static void lcd_fb_flush(void)
     }
 }
 
+static uint16_t lcd_u8g2_draw_unicode_seq(u8g2_t *u8g2,
+                                          uint16_t x,
+                                          uint16_t y,
+                                          const uint16_t *codes,
+                                          uint8_t count)
+{
+    uint8_t i;
+
+    for (i = 0; i < count; i++) {
+        x += u8g2_DrawGlyph(u8g2, x, y, codes[i]);
+    }
+
+    return x;
+}
+
+static void lcd_u8g2_draw_bitmap12x12(u8g2_t *u8g2,
+                                      uint8_t x,
+                                      uint8_t y,
+                                      const uint8_t glyph[24])
+{
+    uint8_t xbmp[24];
+    uint8_t row;
+    uint8_t col;
+
+    rt_memset(xbmp, 0, sizeof(xbmp));
+
+    for (row = 0; row < 12; row++) {
+        uint8_t src_row = row;
+        uint16_t bits = (uint16_t)glyph[src_row * 2U]
+                      | ((uint16_t)glyph[src_row * 2U + 1U] << 8);
+
+        for (col = 0; col < 12; col++) {
+            if (bits & (uint16_t)(1U << col)) {
+                xbmp[row * 2U + (col >> 3)] |= (uint8_t)(1U << (col & 0x07U));
+            }
+        }
+    }
+
+    u8g2_DrawXBMP(u8g2, x, y, 12, 12, xbmp);
+}
+
+static void lcd_u8g2_draw_top_icons(u8g2_t *u8g2, uint8_t x, uint8_t y)
+{
+    lcd_u8g2_draw_bitmap12x12(u8g2, x, y, g_icon_signal_12x12);
+    lcd_u8g2_draw_bitmap12x12(u8g2, (uint8_t)(x + 18U), y, g_icon_g_12x12);
+    lcd_u8g2_draw_bitmap12x12(u8g2, (uint8_t)(x + 36U), y, g_icon_status_12x12);
+
+    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+    u8g2_DrawStr(u8g2, (uint8_t)(x + 50U), (uint8_t)(y + 10U), "05");
+}
 
 
 
@@ -837,46 +888,53 @@ static void lcd_fb_flush(void)
 //}
 
 /*u8g2库的UI主界面*/
-/*u8g2库的UI主界面*/
+
+
 static void lcd_render_home_ui(void)
 {
-    uint8_t safe_left = 0;
-    uint8_t safe_right = (uint8_t)(LCD_COLS - 1U);
+    u8g2_t *u8g2;
+    static const uint16_t g_cn_lxjs[] = {
+        0x8FDE, /* 连 */
+        0x7EED, /* 续 */
+        0x9A7E, /* 驾 */
+        0x9A76  /* 驶 */
+    };
 
-    /* 调整行位置，与目标图片一致
-     * 屏幕64像素高，合理分配4行
-     */
-    uint8_t top_y = 2;      /* 顶部图标行，稍微下移避免贴边 */
-    uint8_t row1_y = 14;    /* 速度+时间行，5x7字体基线 */
-    uint8_t row2_y = 30;    /* 连续驾驶行 */
-    uint8_t row3_y = 46;    /* 电池+ID行 */
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
 
-    lcd_fb_clear();
+    u8g2_port_clear_buffer();
 
-    //lcd_fb_clear()
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
 
+    /* 第1行：先不画顶部图标，避免旧 framebuffer 坐标打架 */
+    lcd_u8g2_draw_top_icons(u8g2, 2, 2);
 
+    /* 第2行：速度 + 时间 */
+    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+    u8g2_DrawStr(u8g2, 10, 24, "0 km/h");
+    u8g2_DrawStr(u8g2, 72, 24, "09:16:45");
 
-    /* 第0行：顶部状态图标 + "05" */
-    lcd_fb_draw_top_icons_12x12(safe_left, top_y);
-    lcd_fb_draw_string5x7((uint8_t)(safe_left + 50), (uint8_t)(top_y + 4), "05");
+    /* 第3行：连续驾驶 + 时长 */
+    u8g2_SetFont(u8g2, u8g2_font_wqy12_t_gb2312);
+    lcd_u8g2_draw_unicode_seq(u8g2, 8, 40, g_cn_lxjs, 4);
 
-    /* 第1行：速度(左) + 时间(右) */
-    lcd_fb_draw_string5x7((uint8_t)(safe_left + 18), row1_y, "0 km/h");
-    lcd_fb_draw_string5x7_scaled_right((uint8_t)(safe_right - 2), row1_y, "09:16:45", 1);
+    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+    u8g2_DrawStr(u8g2, 72, 40, "00:00:00");
 
-    /* 第2行：连续驾驶(左) + 时间(右) */
-    lcd_fb_draw_cn12_string_lxjs((uint8_t)(safe_left + 10), row2_y);
-    lcd_fb_draw_string5x7_scaled_right((uint8_t)(safe_right - 2), (uint8_t)(row2_y + 4), "00:00:00", 1);
+    /* 第4行：黑块 + ID */
+    u8g2_DrawBox(u8g2, 2, 47, 6, 8);
 
-    /* 第3行：电池图标 + ID号
-     * 电池图标改为6x8，和5x7字体对齐
-     */
-    lcd_fb_fill_rect((uint8_t)(safe_left + 2), (uint8_t)(row3_y - 6), 6, 8);
-    lcd_fb_draw_string5x7((uint8_t)(safe_left + 12), row3_y, "800000000000255304");
+    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+    u8g2_DrawStr(u8g2, 12, 58, "800000000000255304");
 
-    lcd_fb_flush();
+    u8g2_port_flush_buffer();
 }
+
+
 
 
 
@@ -912,10 +970,11 @@ int svc_lcd_init(void)
     lcd_backlight_off();
 
     st7567_init_seq();
-
+    u8g2_port_init();
     APP_NON_CAN_LOG("LCD ST7567 init done\r\n");
     return RT_EOK;
 }
+
 
 
 //static void svc_lcd_thread_entry(void *arg)
