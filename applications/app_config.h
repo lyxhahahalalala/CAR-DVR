@@ -2,12 +2,12 @@
 #define APPLICATIONS_APP_CONFIG_H_
 
 #define APP_LED_TASK_NAME            "led_th"
-#define APP_LED_TASK_STACK_SIZE      2048
+#define APP_LED_TASK_STACK_SIZE      1024
 #define APP_LED_TASK_PRIORITY        10
 #define APP_LED_TASK_TICK            10
 
 #define APP_ADC_TASK_NAME            "adc_th"
-#define APP_ADC_TASK_STACK_SIZE      4096
+#define APP_ADC_TASK_STACK_SIZE      2048
 #define APP_ADC_TASK_PRIORITY        11
 #define APP_ADC_TASK_TICK            10
 
@@ -17,7 +17,7 @@
 #define APP_POWER_TASK_TICK          10
 
 #define APP_CAN_TASK_NAME            "can_th"
-#define APP_CAN_TASK_STACK_SIZE      2048
+#define APP_CAN_TASK_STACK_SIZE      1024
 #define APP_CAN_TASK_PRIORITY        9
 #define APP_CAN_TASK_TICK            10
 
@@ -60,12 +60,12 @@
 #endif
 
 #define APP_IO_TASK_NAME             "vehio_th"
-#define APP_IO_TASK_STACK_SIZE       2048
+#define APP_IO_TASK_STACK_SIZE       1024
 #define APP_IO_TASK_PRIORITY         12
 #define APP_IO_TASK_TICK             10
 
 #define APP_STORAGE_TASK_NAME        "store_th"
-#define APP_STORAGE_TASK_STACK_SIZE  2048
+#define APP_STORAGE_TASK_STACK_SIZE  1024
 #define APP_STORAGE_TASK_PRIORITY    13
 #define APP_STORAGE_TASK_TICK        10
 

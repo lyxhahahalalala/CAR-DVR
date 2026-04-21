@@ -25,6 +25,7 @@ RM := rm -rf
 -include rt-thread/components/drivers/hwtimer/subdir.mk
 -include rt-thread/components/drivers/core/subdir.mk
 -include rt-thread/components/drivers/can/subdir.mk
+-include packages/u8g2-official-latest/csrc/subdir.mk
 -include libraries/misc/rtt_os_tick/subdir.mk
 -include libraries/misc/rtt_interrupt_util/subdir.mk
 -include libraries/hpm_sdk/utils/subdir.mk
@@ -73,7 +74,7 @@ all: rtthread.elf secondary-outputs
 
 # 工具调用
 rtthread.elf: $(OBJS) $(USER_OBJS)
-	riscv32-unknown-elf-gcc -march=rv32imac -mabi=ilp32 -msmall-data-limit=8 -mno-strict-align -mno-save-restore -Og -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections  -g3 -gdwarf-2 -T "D:\Users\lyx\project\0407_CARDVR\1\hpm6200SDKv1.10_tachographs_isok\board\linker_scripts\gcc\flash_rtt.ld" -Xlinker --gc-sections -Xlinker -print-memory-usage -Wl,-Map,"rtthread.map" --specs=nano.specs -u _printf_float -u _scanf_float --specs=nosys.specs -nostartfiles -Wl,--gc-sections -Wl,-cref,-Map=rtthread.map -mcmodel=medlow -o "rtthread.elf" $(OBJS) $(USER_OBJS) $(LIBS)
+	riscv32-unknown-elf-gcc -march=rv32imac -mabi=ilp32 -msmall-data-limit=8 -mno-strict-align -mno-save-restore -Og -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections  -g3 -gdwarf-2 -T "D:\Users\lyx\project\0407_CARDVR\1\hpm6200SDKv1.10_tachographs_isok\board\linker_scripts\gcc\flash_rtt.ld" -Xlinker --gc-sections -Xlinker -print-memory-usage -Wl,-Map,"rtthread.map" --specs=nano.specs -u _printf_float -u _scanf_float -nostartfiles -Wl,--gc-sections -Wl,-cref,-Map=rtthread.map -mcmodel=medlow -o "rtthread.elf" $(OBJS) $(USER_OBJS) $(LIBS)
 
 rtthread.bin: rtthread.elf
 	riscv32-unknown-elf-objcopy -O binary "rtthread.elf"  "rtthread.bin"

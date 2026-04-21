@@ -18,7 +18,7 @@ config PKGS_DIR
 config PLATFORM_DIR
     string
     option env="PLATFORM_DIR"
-    default "D:/Users/lyx/project/0407_CARDVR/1/hpm6200SDKv1.10_tachographs/platform"
+    default "D:/Users/lyx/project/0407_CARDVR/1/hpm6200SDKv1.10_tachographs_isok/platform"
 
 source "$RTT_DIR/Kconfig"
 source "$PKGS_DIR/Kconfig"
