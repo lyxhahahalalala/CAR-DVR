@@ -9,6 +9,7 @@
 #include "svc_power.h"
 #include "svc_storage.h"
 #include "svc_vehicle_io.h"
+#include "app_usart_cmd.h"
 
 int app_framework_init(void)
 {
@@ -23,6 +24,11 @@ int app_framework_init(void)
     svc_can_init();
     svc_vehicle_io_init();
     svc_storage_init();
+    //app_usart_cmd_init();
+    if (app_usart_cmd_init() != RT_EOK)
+        {
+            return -RT_ERROR;
+        }
 
     return RT_EOK;
 }

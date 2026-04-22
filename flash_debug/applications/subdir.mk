@@ -7,6 +7,7 @@ C_SRCS += \
 ../applications/app_can.c \
 ../applications/app_init.c \
 ../applications/app_task.c \
+../applications/app_usart_cmd.c \
 ../applications/main.c \
 ../applications/svc_adc.c \
 ../applications/svc_can.c \
@@ -23,6 +24,7 @@ OBJS += \
 ./applications/app_can.o \
 ./applications/app_init.o \
 ./applications/app_task.o \
+./applications/app_usart_cmd.o \
 ./applications/main.o \
 ./applications/svc_adc.o \
 ./applications/svc_can.o \
@@ -39,6 +41,7 @@ C_DEPS += \
 ./applications/app_can.d \
 ./applications/app_init.d \
 ./applications/app_task.d \
+./applications/app_usart_cmd.d \
 ./applications/main.d \
 ./applications/svc_adc.d \
 ./applications/svc_can.d \

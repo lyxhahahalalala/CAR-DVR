@@ -8,6 +8,7 @@
 #include "svc_power.h"
 #include "svc_storage.h"
 #include "svc_vehicle_io.h"
+#include "app_usart_cmd.h"
 
 int app_task_start(void)
 {
@@ -57,5 +58,10 @@ int app_task_start(void)
         return result;
     }
 
+    result = app_usart_cmd_task_start();
+    if (result != RT_EOK)
+    {
+        return result;
+    }
     return RT_EOK;
 }
