@@ -687,6 +687,17 @@ static rt_bool_t lcd_home_ui_set_data(uint16_t speed_kmh,
 }
 
 
+void svc_lcd_update_home_time(uint8_t hour, uint8_t minute, uint8_t second)
+{
+    (void)lcd_home_ui_set_data(g_lcd_home_ui.speed_kmh,
+                               hour,
+                               minute,
+                               second,
+                               g_lcd_home_ui.drive_hour,
+                               g_lcd_home_ui.drive_minute,
+                               g_lcd_home_ui.drive_second,
+                               g_lcd_home_ui.card_id);
+}
 
 
 
@@ -1008,7 +1019,7 @@ static void svc_lcd_thread_entry(void *arg)
 
         while (1)
            {
-            lcd_home_ui_test_update_every_second();
+           // lcd_home_ui_test_update_every_second();//测试验证
                if (svc_adc_consume_s1_event() == RT_TRUE) {
                    if (g_lcd_menu_mode == RT_FALSE) {
                        g_lcd_menu_mode = RT_TRUE;
