@@ -566,7 +566,7 @@ static void lcd_u8g2_draw_menu_item(u8g2_t *u8g2,
 }
 
 
-
+//菜鸟
 static void lcd_render_menu_ui(void)
 {
     u8g2_t *u8g2;
@@ -1044,6 +1044,7 @@ static void svc_lcd_thread_entry(void *arg)
                            g_lcd_need_redraw = RT_TRUE;
                        }
                    }
+
                }
 
                if (g_lcd_need_redraw == RT_TRUE) {

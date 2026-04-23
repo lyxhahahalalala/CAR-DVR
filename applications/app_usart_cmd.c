@@ -45,43 +45,108 @@ static rt_bool_t app_uart_cmd_ring_pop(app_uart_cmd_ring_t *ring, uint8_t *byte)
 
 
 
+//static rt_bool_t app_uart_cmd_try_parse_frame(app_uart_cmd_frame_t *frame)
+//{
+//    static uint8_t collecting = 0U;
+//    static uint8_t temp[APP_UART_CMD_FRAME_MAX_SIZE];
+//    static uint8_t index = 0U;
+//    uint8_t byte;
+//
+//    while (app_uart_cmd_ring_pop(&g_uart_cmd_rx_ring, &byte) == RT_TRUE) {
+//        if (collecting == 0U) {
+//            if (byte == APP_UART_CMD_FRAME_HEAD) {
+//                collecting = 1U;
+//                index = 0U;
+//                temp[index++] = byte;
+//            }
+//            continue;
+//        }
+//
+//        if (index < APP_UART_CMD_FRAME_MAX_SIZE) {
+//            temp[index++] = byte;
+//        } else {
+//            collecting = 0U;
+//            index = 0U;
+//            continue;
+//        }
+//
+//        if (byte == APP_UART_CMD_FRAME_TAIL) {
+//            frame->length = index;
+//            rt_memcpy(frame->data, temp, index);
+//
+//            collecting = 0U;
+//            index = 0U;
+//            return RT_TRUE;
+//        }
+//    }
+//
+//    return RT_FALSE;
+//}
 static rt_bool_t app_uart_cmd_try_parse_frame(app_uart_cmd_frame_t *frame)
 {
-    static uint8_t collecting = 0U;
+    static uint8_t state = 0U;
     static uint8_t temp[APP_UART_CMD_FRAME_MAX_SIZE];
     static uint8_t index = 0U;
+    static uint8_t expect_len = 0U;
     uint8_t byte;
 
     while (app_uart_cmd_ring_pop(&g_uart_cmd_rx_ring, &byte) == RT_TRUE) {
-        if (collecting == 0U) {
+        switch (state) {
+        case 0:
             if (byte == APP_UART_CMD_FRAME_HEAD) {
-                collecting = 1U;
-                index = 0U;
-                temp[index++] = byte;
+                temp[0] = byte;
+                index = 1U;
+                expect_len = 0U;
+                state = 1U;
             }
-            continue;
-        }
+            break;
 
-        if (index < APP_UART_CMD_FRAME_MAX_SIZE) {
+        case 1:
             temp[index++] = byte;
-        } else {
-            collecting = 0U;
-            index = 0U;
-            continue;
-        }
+            expect_len = byte;
 
-        if (byte == APP_UART_CMD_FRAME_TAIL) {
-            frame->length = index;
-            rt_memcpy(frame->data, temp, index);
+            if ((expect_len < 3U) || (expect_len > APP_UART_CMD_FRAME_MAX_SIZE)) {
+                state = 0U;
+                index = 0U;
+                expect_len = 0U;
+            } else {
+                state = 2U;
+            }
+            break;
 
-            collecting = 0U;
+        case 2:
+            temp[index++] = byte;
+
+            if (index >= expect_len) {
+                if (temp[expect_len - 1U] == APP_UART_CMD_FRAME_TAIL) {
+                    frame->length = expect_len;
+                    rt_memcpy(frame->data, temp, expect_len);
+
+                    state = 0U;
+                    index = 0U;
+                    expect_len = 0U;
+                    return RT_TRUE;
+                }
+
+                state = 0U;
+                index = 0U;
+                expect_len = 0U;
+            }
+            break;
+
+        default:
+            state = 0U;
             index = 0U;
-            return RT_TRUE;
+            expect_len = 0U;
+            break;
         }
     }
 
     return RT_FALSE;
 }
+
+
+
 
 
 static void app_uart_cmd_dump_frame(const uint8_t *buf, uint8_t len)
