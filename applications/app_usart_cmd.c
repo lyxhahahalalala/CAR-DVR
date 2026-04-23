@@ -43,45 +43,17 @@ static rt_bool_t app_uart_cmd_ring_pop(app_uart_cmd_ring_t *ring, uint8_t *byte)
     return RT_TRUE;
 }
 
+static void app_uart_cmd_dump_frame(const uint8_t *buf, uint8_t len)
+{
+    uint8_t i;
 
+    rt_kprintf("[uart_cmd][frame] len=%u data:", len);
+    for (i = 0; i < len; i++) {
+        rt_kprintf(" %02X", buf[i]);
+    }
+    rt_kprintf("\n");
+}
 
-//static rt_bool_t app_uart_cmd_try_parse_frame(app_uart_cmd_frame_t *frame)
-//{
-//    static uint8_t collecting = 0U;
-//    static uint8_t temp[APP_UART_CMD_FRAME_MAX_SIZE];
-//    static uint8_t index = 0U;
-//    uint8_t byte;
-//
-//    while (app_uart_cmd_ring_pop(&g_uart_cmd_rx_ring, &byte) == RT_TRUE) {
-//        if (collecting == 0U) {
-//            if (byte == APP_UART_CMD_FRAME_HEAD) {
-//                collecting = 1U;
-//                index = 0U;
-//                temp[index++] = byte;
-//            }
-//            continue;
-//        }
-//
-//        if (index < APP_UART_CMD_FRAME_MAX_SIZE) {
-//            temp[index++] = byte;
-//        } else {
-//            collecting = 0U;
-//            index = 0U;
-//            continue;
-//        }
-//
-//        if (byte == APP_UART_CMD_FRAME_TAIL) {
-//            frame->length = index;
-//            rt_memcpy(frame->data, temp, index);
-//
-//            collecting = 0U;
-//            index = 0U;
-//            return RT_TRUE;
-//        }
-//    }
-//
-//    return RT_FALSE;
-//}
 static rt_bool_t app_uart_cmd_try_parse_frame(app_uart_cmd_frame_t *frame)
 {
     static uint8_t state = 0U;
@@ -145,23 +117,6 @@ static rt_bool_t app_uart_cmd_try_parse_frame(app_uart_cmd_frame_t *frame)
     return RT_FALSE;
 }
 
-
-
-
-
-static void app_uart_cmd_dump_frame(const uint8_t *buf, uint8_t len)
-{
-    uint8_t i;
-
-    rt_kprintf("[uart_cmd][frame] len=%u data:", len);
-    for (i = 0; i < len; i++) {
-        rt_kprintf(" %02X", buf[i]);
-    }
-    rt_kprintf("\n");
-}
-
-
-
 static uint16_t app_uart_cmd_build_ack(uint8_t type, uint8_t ret, uint8_t *buf, uint16_t buf_size)
 {
     if ((buf == RT_NULL) || (buf_size < 8U)) {
@@ -218,15 +173,14 @@ static rt_err_t app_uart_cmd_rx_indicate(rt_device_t dev, rt_size_t size)
     return RT_EOK;
 }
 
-static void app_uart_cmd_timestamp_to_hms(uint32_t timestamp,
-                                          uint8_t *hour,
-                                          uint8_t *minute,
-                                          uint8_t *second)
+static void app_uart_cmd_time_to_hms(uint32_t timestamp,
+                                     uint8_t *hour,
+                                     uint8_t *minute,
+                                     uint8_t *second)
 {
     uint32_t local_seconds;
     uint32_t seconds_of_day;
 
-    /* Unix timestamp -> UTC+8 */
     local_seconds = timestamp + 8U * 3600U;
     seconds_of_day = local_seconds % 86400U;
 
@@ -240,6 +194,100 @@ static void app_uart_cmd_timestamp_to_hms(uint32_t timestamp,
         *second = (uint8_t)(seconds_of_day % 60U);
     }
 }
+
+static void app_uart_cmd_seconds_to_hms(uint32_t total_seconds,
+                                        uint8_t *hour,
+                                        uint8_t *minute,
+                                        uint8_t *second)
+{
+    uint32_t seconds_of_day;
+
+    seconds_of_day = total_seconds % 86400U;
+
+    if (hour != RT_NULL) {
+        *hour = (uint8_t)(seconds_of_day / 3600U);
+    }
+    if (minute != RT_NULL) {
+        *minute = (uint8_t)((seconds_of_day % 3600U) / 60U);
+    }
+    if (second != RT_NULL) {
+        *second = (uint8_t)(seconds_of_day % 60U);
+    }
+}
+
+static void app_uart_cmd_bcd_to_str18(const uint8_t raw[9], char str[19])
+{
+    uint8_t i;
+
+    if ((raw == RT_NULL) || (str == RT_NULL)) {
+        return;
+    }
+
+    for (i = 0; i < 9U; i++) {
+        str[i * 2U]     = (char)('0' + ((raw[i] >> 4) & 0x0FU));
+        str[i * 2U + 1] = (char)('0' + (raw[i] & 0x0FU));
+    }
+
+    str[18] = '\0';
+}
+
+
+static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame,
+                                               app_soc_status_msg_t *msg)
+{
+    uint8_t status_bits;
+
+    if ((frame == RT_NULL) || (msg == RT_NULL) || (frame->length < 32U)) {
+        return RT_FALSE;
+    }
+
+    if ((frame->data[0] != APP_UART_CMD_FRAME_HEAD) || (frame->data[2] != 0x01U)) {
+        return RT_FALSE;
+    }
+
+    status_bits = frame->data[3];
+
+    msg->camera1_status  = (status_bits >> 0) & 0x01U;
+    msg->camera2_status  = (status_bits >> 1) & 0x01U;
+    msg->camera3_status  = (status_bits >> 2) & 0x01U;
+    msg->camera4_status  = (status_bits >> 3) & 0x01U;
+    msg->record_status   = (status_bits >> 4) & 0x01U;
+    msg->location_status = (status_bits >> 5) & 0x01U;
+    msg->reserved        = 0U;
+
+    msg->signal = frame->data[4];
+    msg->used_satellite = frame->data[5];
+
+    msg->total_capacity = ((uint32_t)frame->data[6] << 24)
+                        | ((uint32_t)frame->data[7] << 16)
+                        | ((uint32_t)frame->data[8] << 8)
+                        | ((uint32_t)frame->data[9]);
+
+    msg->used_capacity = ((uint32_t)frame->data[10] << 24)
+                       | ((uint32_t)frame->data[11] << 16)
+                       | ((uint32_t)frame->data[12] << 8)
+                       | ((uint32_t)frame->data[13]);
+
+    msg->timestamp = ((uint32_t)frame->data[14])
+                   | ((uint32_t)frame->data[15] << 8)
+                   | ((uint32_t)frame->data[16] << 16)
+                   | ((uint32_t)frame->data[17] << 24);
+
+    msg->driver_time = ((uint32_t)frame->data[18])
+                     | ((uint32_t)frame->data[19] << 8)
+                     | ((uint32_t)frame->data[20] << 16)
+                     | ((uint32_t)frame->data[21] << 24);
+
+    //msg->driver_speed = frame->data[22];
+    msg->driver_speed = (uint16_t)frame->data[22]
+                      | ((uint16_t)frame->data[23] << 8);
+
+
+        rt_memcpy(msg->ic_card_id_raw, &frame->data[24], 9U);
+
+        return RT_TRUE;
+}
+
 
 static void app_usart_cmd_thread_entry(void *parameter)
 {
@@ -269,9 +317,7 @@ int app_usart_cmd_init(void)
         return -RT_ERROR;
     }
 
-
     result = rt_device_open(g_uart_cmd_dev, RT_DEVICE_FLAG_DMA_RX | RT_DEVICE_FLAG_RDWR);
-    //result = rt_device_open(g_uart_cmd_dev, RT_DEVICE_FLAG_INT_RX | RT_DEVICE_FLAG_RDWR);
     if (result != RT_EOK) {
         return result;
     }
@@ -340,72 +386,56 @@ rt_bool_t app_usart_cmd_send_ack(uint8_t type, uint8_t ret)
     return RT_TRUE;
 }
 
-void app_usart_cmd_handle_frame(const app_uart_cmd_frame_t *frame)
-{
-    uint8_t type;
-    uint32_t timestamp;
-    uint8_t hour;
-    uint8_t minute;
-    uint8_t second;
-
-    if ((frame == RT_NULL) || (frame->length < 8U)) {
-        return;
-    }
-
-    type = frame->data[2];
-
-    if (type == 0x01U) {
-        /* Timestamp is located in the 4 bytes before CRC(2B) and tail(1B). */
-        timestamp = ((uint32_t)frame->data[frame->length - 7U])
-                  | ((uint32_t)frame->data[frame->length - 6U] << 8)
-                  | ((uint32_t)frame->data[frame->length - 5U] << 16)
-                  | ((uint32_t)frame->data[frame->length - 4U] << 24);
-
-        app_uart_cmd_timestamp_to_hms(timestamp, &hour, &minute, &second);
-
-        rt_kprintf("[uart_cmd][time] ts=0x%08X -> %02u:%02u:%02u\n",
-                   timestamp, hour, minute, second);
-
-        svc_lcd_update_home_time(hour, minute, second);
-    }
-}
-
-
 void app_usart_cmd_poll(void)
 {
     app_uart_cmd_frame_t frame;
 
     while (app_uart_cmd_try_parse_frame(&frame) == RT_TRUE) {
-        uint8_t type;
-        uint32_t timestamp;
+        app_soc_status_msg_t msg;
         uint8_t hour;
         uint8_t minute;
         uint8_t second;
+        uint8_t drive_hour;
+        uint8_t drive_minute;
+        uint8_t drive_second;
+        char ic_card_id_str[19];
+
 
         g_uart_cmd_last_frame = frame;
 
         app_uart_cmd_dump_frame(frame.data, frame.length);
 
-        if (frame.length < 3U) {
+        if (app_uart_cmd_parse_soc_status(&frame, &msg) != RT_TRUE) {
             continue;
         }
 
-        type = frame.data[2];
+        app_uart_cmd_time_to_hms(msg.timestamp, &hour, &minute, &second);
+        app_uart_cmd_seconds_to_hms(msg.driver_time, &drive_hour, &drive_minute, &drive_second);
+        app_uart_cmd_bcd_to_str18(msg.ic_card_id_raw, ic_card_id_str);
 
-        if ((type == 0x01U) && (frame.length >= 8U)) {
-            timestamp = ((uint32_t)frame.data[frame.length - 7U])
-                      | ((uint32_t)frame.data[frame.length - 6U] << 8)
-                      | ((uint32_t)frame.data[frame.length - 5U] << 16)
-                      | ((uint32_t)frame.data[frame.length - 4U] << 24);
+        rt_kprintf("[uart_cmd][soc] cam=%u%u%u%u rec=%u loc=%u sim=%u sat=%u ts=0x%08X drv=%lu spd=%u card=%s\n",
+                   msg.camera1_status,
+                   msg.camera2_status,
+                   msg.camera3_status,
+                   msg.camera4_status,
+                   msg.record_status,
+                   msg.location_status,
+                   msg.signal,
+                   msg.used_satellite,
+                   msg.timestamp,
+                   (unsigned long)msg.driver_time,
+                   (unsigned int)msg.driver_speed,
+                   ic_card_id_str);
 
-            app_uart_cmd_timestamp_to_hms(timestamp, &hour, &minute, &second);
+        rt_kprintf("[uart_cmd][time] %02u:%02u:%02u drive=%02u:%02u:%02u\n",
+                   hour, minute, second,
+                   drive_hour, drive_minute, drive_second);
 
-            rt_kprintf("[uart_cmd][time] ts=0x%08X -> %02u:%02u:%02u\n",
-                       timestamp, hour, minute, second);
+        svc_lcd_update_home_time(hour, minute, second);
+        svc_lcd_update_top_status(msg.used_satellite);
+        svc_lcd_update_home_speed(msg.driver_speed);
+        svc_lcd_update_drive_time(drive_hour, drive_minute, drive_second);
+        svc_lcd_update_card_id(ic_card_id_str);
 
-            svc_lcd_update_home_time(hour, minute, second);
-        }
     }
 }
-
-

@@ -21,6 +21,8 @@ static uint8_t g_adc_key_confirm = 0;
 static rt_bool_t g_adc_s1_event = RT_FALSE;
 static rt_bool_t g_adc_s2_event = RT_FALSE;
 static rt_bool_t g_adc_s3_event = RT_FALSE;
+static rt_bool_t g_adc_s4_event = RT_FALSE;
+
 
 static rt_uint32_t svc_adc_raw_to_pin_mv(rt_uint32_t raw)
 {
@@ -106,8 +108,11 @@ static void svc_adc_update_key_events(void)
             g_adc_s2_event = RT_TRUE;
         } else if (key_now == ADC_KEY_S3) {
             g_adc_s3_event = RT_TRUE;
+        } else if (key_now == ADC_KEY_S4) {
+            g_adc_s4_event = RT_TRUE;
         }
     }
+
 }
 
 static void svc_adc_sample_update(rt_adc_device_t adc_dev)
@@ -200,6 +205,7 @@ int svc_adc_init(void)
     g_adc_s1_event = RT_FALSE;
     g_adc_s2_event = RT_FALSE;
     g_adc_s3_event = RT_FALSE;
+    g_adc_s4_event = RT_FALSE;
     return RT_EOK;
 }
 
@@ -246,5 +252,13 @@ rt_bool_t svc_adc_consume_s3_event(void)
 {
     rt_bool_t event = g_adc_s3_event;
     g_adc_s3_event = RT_FALSE;
+    return event;
+}
+
+
+rt_bool_t svc_adc_consume_s4_event(void)
+{
+    rt_bool_t event = g_adc_s4_event;
+    g_adc_s4_event = RT_FALSE;
     return event;
 }

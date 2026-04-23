@@ -28,6 +28,11 @@ void lcd_fb_public_flush(void);
 void lcd_fb_public_copy_pages(const uint8_t *src, uint16_t src_stride);
 void svc_lcd_update_home_time(uint8_t hour, uint8_t minute, uint8_t second);
 
+void svc_lcd_update_top_status(uint8_t value);
+void svc_lcd_update_home_speed(uint16_t speed_kmh_x10);
+void svc_lcd_update_drive_time(uint8_t hour, uint8_t minute, uint8_t second);
+void svc_lcd_update_card_id(const char *card_id);
+
 
 
 #endif /* APPLICATIONS_SVC_LCD_H_ */
