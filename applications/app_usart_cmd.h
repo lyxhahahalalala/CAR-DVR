@@ -8,8 +8,8 @@
 #define APP_UART_CMD_DEV_NAME            "uart3"
 #define APP_UART_CMD_FRAME_HEAD          0xAAU
 #define APP_UART_CMD_FRAME_TAIL          0x55U
-#define APP_UART_CMD_FRAME_MAX_SIZE      64U
-#define APP_UART_CMD_RX_BUF_SIZE         64U
+#define APP_UART_CMD_FRAME_MAX_SIZE      128U
+#define APP_UART_CMD_RX_BUF_SIZE         256U
 #define APP_UART_CMD_ACK_RET_OK          1U
 #define APP_UART_CMD_ACK_RET_ERR         0U
 
@@ -26,24 +26,35 @@ typedef struct
 
 typedef struct
 {
-    uint8_t camera1_status  : 1;//摄像头1状态
-    uint8_t camera2_status  : 1;//摄像头2状态
-    uint8_t camera3_status  : 1;//摄像头3状态
-    uint8_t camera4_status  : 1;//摄像头4状态
+    uint8_t camera1_status  : 1;// 摄像头1状态
+    uint8_t camera2_status  : 1;// 摄像头2状态
+    uint8_t camera3_status  : 1;// 摄像头3状态
+    uint8_t camera4_status  : 1;// 摄像头4状态
     uint8_t record_status   : 1;// 录音状态
     uint8_t location_status : 1;// 定位状态
-    uint8_t reserved        : 2;
+    uint8_t ic_card_status  : 1;// IC卡状态
+    uint8_t udisk_status    : 1;// U盘状态
 
-    uint8_t signal;// SIM卡信号
-    uint8_t used_satellite;// 使用的卫星数
+    uint8_t ip1_connected   : 1;// IP1连接状态
+    uint8_t ip2_connected   : 1;// IP2连接状态
+    uint8_t gsm_connected   : 1;// GSM连接状态
+    uint8_t protect_storage : 1;// 防护存储器状态
+    uint8_t reserved        : 4;
 
-    uint32_t total_capacity;// 安全存储器总容量(KB)，大端序
-    uint32_t used_capacity;// 安全存储器使用容量(KB)，大端序
-    uint32_t timestamp;// UTc时间戳(秒)
+    uint8_t driver_number[9];// 驾驶员证号，BCD码
+    uint32_t total_capacity;// 安全存储器总容量(KB)
+    uint32_t free_capacity;
     uint32_t driver_time;// 驾驶时间(秒)
-    uint16_t driver_speed;//参考速度
-    uint8_t ic_card_id_raw[9];//ic卡信息
+    uint8_t sim_signal; // SIM卡信号
+    uint8_t phone_number[10];// 手机号，BCD码
+    uint8_t used_satellite;// 使用的卫星数
+    uint32_t timestamp;// UTC时间戳(秒)
+    uint16_t driver_speed;// 速度，0.1km/h
+    uint8_t terminal_id[30];// 终端ID
+    uint32_t ip1;// 第1服务器地址
+    uint32_t ip2;// 第2服务器地址
 } app_soc_status_msg_t;
+
 
 
 typedef void (*app_uart_cmd_tx_fn_t)(const uint8_t *data, uint16_t len);

@@ -156,11 +156,7 @@ static rt_err_t app_uart_cmd_rx_indicate(rt_device_t dev, rt_size_t size)
             app_usart_cmd_push_byte(ch);
             has_data = RT_TRUE;
 
-            if ((ch >= 0x20U) && (ch <= 0x7EU)) {
-                rt_kprintf("[uart_cmd][raw] '%c' (0x%02X)\n", ch, ch);
-            } else {
-                rt_kprintf("[uart_cmd][raw] 0x%02X\n", ch);
-            }
+
         } else {
             break;
         }
@@ -231,13 +227,40 @@ static void app_uart_cmd_bcd_to_str18(const uint8_t raw[9], char str[19])
     str[18] = '\0';
 }
 
+static uint16_t app_uart_cmd_read_le16(const uint8_t *buf)
+{
+    if (buf == RT_NULL) {
+        return 0U;
+    }
+
+    return (uint16_t)buf[0]
+         | ((uint16_t)buf[1] << 8);
+}
+
+static uint32_t app_uart_cmd_read_le32(const uint8_t *buf)
+{
+    if (buf == RT_NULL) {
+        return 0UL;
+    }
+
+    return (uint32_t)buf[0]
+         | ((uint32_t)buf[1] << 8)
+         | ((uint32_t)buf[2] << 16)
+         | ((uint32_t)buf[3] << 24);
+}
+
+
+
+
+
 
 static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame,
                                                app_soc_status_msg_t *msg)
 {
-    uint8_t status_bits;
+    uint8_t status_bits_1;
+    uint8_t status_bits_2;
 
-    if ((frame == RT_NULL) || (msg == RT_NULL) || (frame->length < 32U)) {
+    if ((frame == RT_NULL) || (msg == RT_NULL) || (frame->length < 85U)) {
         return RT_FALSE;
     }
 
@@ -245,48 +268,46 @@ static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame
         return RT_FALSE;
     }
 
-    status_bits = frame->data[3];
+    status_bits_1 = frame->data[3];
+    status_bits_2 = frame->data[4];
 
-    msg->camera1_status  = (status_bits >> 0) & 0x01U;
-    msg->camera2_status  = (status_bits >> 1) & 0x01U;
-    msg->camera3_status  = (status_bits >> 2) & 0x01U;
-    msg->camera4_status  = (status_bits >> 3) & 0x01U;
-    msg->record_status   = (status_bits >> 4) & 0x01U;
-    msg->location_status = (status_bits >> 5) & 0x01U;
+    msg->camera1_status  = (status_bits_1 >> 0) & 0x01U;
+    msg->camera2_status  = (status_bits_1 >> 1) & 0x01U;
+    msg->camera3_status  = (status_bits_1 >> 2) & 0x01U;
+    msg->camera4_status  = (status_bits_1 >> 3) & 0x01U;
+    msg->record_status   = (status_bits_1 >> 4) & 0x01U;
+    msg->location_status = (status_bits_1 >> 5) & 0x01U;
+    msg->ic_card_status  = (status_bits_1 >> 6) & 0x01U;
+    msg->udisk_status    = (status_bits_1 >> 7) & 0x01U;
+
+    msg->ip1_connected   = (status_bits_2 >> 0) & 0x01U;
+    msg->ip2_connected   = (status_bits_2 >> 1) & 0x01U;
+    msg->gsm_connected   = (status_bits_2 >> 2) & 0x01U;
+    msg->protect_storage = (status_bits_2 >> 3) & 0x01U;
     msg->reserved        = 0U;
 
-    msg->signal = frame->data[4];
-    msg->used_satellite = frame->data[5];
+    rt_memcpy(msg->driver_number, &frame->data[5], 9U);
 
-    msg->total_capacity = ((uint32_t)frame->data[6] << 24)
-                        | ((uint32_t)frame->data[7] << 16)
-                        | ((uint32_t)frame->data[8] << 8)
-                        | ((uint32_t)frame->data[9]);
+    msg->total_capacity = app_uart_cmd_read_le32(&frame->data[14]);
+    msg->free_capacity  = app_uart_cmd_read_le32(&frame->data[18]);
+    msg->driver_time    = app_uart_cmd_read_le32(&frame->data[22]);
 
-    msg->used_capacity = ((uint32_t)frame->data[10] << 24)
-                       | ((uint32_t)frame->data[11] << 16)
-                       | ((uint32_t)frame->data[12] << 8)
-                       | ((uint32_t)frame->data[13]);
+    msg->sim_signal = frame->data[26];
 
-    msg->timestamp = ((uint32_t)frame->data[14])
-                   | ((uint32_t)frame->data[15] << 8)
-                   | ((uint32_t)frame->data[16] << 16)
-                   | ((uint32_t)frame->data[17] << 24);
+    rt_memcpy(msg->phone_number, &frame->data[27], 10U);
 
-    msg->driver_time = ((uint32_t)frame->data[18])
-                     | ((uint32_t)frame->data[19] << 8)
-                     | ((uint32_t)frame->data[20] << 16)
-                     | ((uint32_t)frame->data[21] << 24);
+    msg->used_satellite = frame->data[37];
+    msg->timestamp      = app_uart_cmd_read_le32(&frame->data[38]);
+    msg->driver_speed   = app_uart_cmd_read_le16(&frame->data[42]);
 
-    //msg->driver_speed = frame->data[22];
-    msg->driver_speed = (uint16_t)frame->data[22]
-                      | ((uint16_t)frame->data[23] << 8);
+    rt_memcpy(msg->terminal_id, &frame->data[44], 30U);
 
+    msg->ip1 = app_uart_cmd_read_le32(&frame->data[74]);
+    msg->ip2 = app_uart_cmd_read_le32(&frame->data[78]);
 
-        rt_memcpy(msg->ic_card_id_raw, &frame->data[24], 9U);
-
-        return RT_TRUE;
+    return RT_TRUE;
 }
+
 
 
 static void app_usart_cmd_thread_entry(void *parameter)
@@ -398,7 +419,7 @@ void app_usart_cmd_poll(void)
         uint8_t drive_hour;
         uint8_t drive_minute;
         uint8_t drive_second;
-        char ic_card_id_str[19];
+        char driver_number_str[19];
 
 
         g_uart_cmd_last_frame = frame;
@@ -411,21 +432,32 @@ void app_usart_cmd_poll(void)
 
         app_uart_cmd_time_to_hms(msg.timestamp, &hour, &minute, &second);
         app_uart_cmd_seconds_to_hms(msg.driver_time, &drive_hour, &drive_minute, &drive_second);
-        app_uart_cmd_bcd_to_str18(msg.ic_card_id_raw, ic_card_id_str);
+        app_uart_cmd_bcd_to_str18(msg.driver_number, driver_number_str);
 
-        rt_kprintf("[uart_cmd][soc] cam=%u%u%u%u rec=%u loc=%u sim=%u sat=%u ts=0x%08X drv=%lu spd=%u card=%s\n",
+
+        rt_kprintf("[uart_cmd][soc] cam=%u%u%u%u rec=%u loc=%u ic=%u udisk=%u ip=%u%u gsm=%u sim=%u sat=%u total=%luKB free=%luKB ts=0x%08X drv=%lu spd=%u driver=%s\n",
                    msg.camera1_status,
                    msg.camera2_status,
                    msg.camera3_status,
                    msg.camera4_status,
                    msg.record_status,
                    msg.location_status,
-                   msg.signal,
+                   msg.ic_card_status,
+                   msg.udisk_status,
+                   msg.ip1_connected,
+                   msg.ip2_connected,
+                   msg.gsm_connected,
+                   msg.sim_signal,
                    msg.used_satellite,
+                   (unsigned long)msg.total_capacity,
+                   (unsigned long)msg.free_capacity,
                    msg.timestamp,
                    (unsigned long)msg.driver_time,
                    (unsigned int)msg.driver_speed,
-                   ic_card_id_str);
+                   driver_number_str);
+
+
+
 
         rt_kprintf("[uart_cmd][time] %02u:%02u:%02u drive=%02u:%02u:%02u\n",
                    hour, minute, second,
@@ -435,7 +467,7 @@ void app_usart_cmd_poll(void)
         svc_lcd_update_top_status(msg.used_satellite);
         svc_lcd_update_home_speed(msg.driver_speed);
         svc_lcd_update_drive_time(drive_hour, drive_minute, drive_second);
-        svc_lcd_update_card_id(ic_card_id_str);
+        svc_lcd_update_card_id(driver_number_str);
 
     }
 }
