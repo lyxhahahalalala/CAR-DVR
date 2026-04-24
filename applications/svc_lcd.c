@@ -202,14 +202,10 @@ static const uint16_t g_menu_item_text_7[] = {
 static const uint16_t *const g_menu_item_texts_u8g2[] = {
     g_menu_item_text_1,
     g_menu_item_text_2,
-    g_menu_item_text_3,
-    g_menu_item_text_4,
-    g_menu_item_text_5,
-    g_menu_item_text_6,
-    g_menu_item_text_7
+    g_menu_item_text_3
 };
 
-static const uint8_t g_menu_item_text_counts_u8g2[] = {4, 4, 4, 6, 4, 5, 6};
+static const uint8_t g_menu_item_text_counts_u8g2[] = {4, 4, 4};
 static const uint16_t g_drive_sub_item_1[] = {
     0x75B2, 0x52B3, 0x9A7E, 0x9A76 /* 疲劳驾驶 */
 };
@@ -261,6 +257,42 @@ static const uint16_t *const g_drive_sub_item_texts_u8g2[] = {
 static const uint8_t g_drive_sub_item_counts_u8g2[] = {
     4, 4, 4, 5, 4, 6, 4, 4, 4
 };
+
+static const uint16_t g_device_sub_item_1[] = {0x7248, 0x672C, 0x53F7, 0x67E5, 0x8BE2};
+static const uint16_t g_device_sub_item_2[] = {0x0047, 0x0046, 0x0052, 0x0053, 0x4FE1, 0x606F};
+static const uint16_t g_device_sub_item_3[] = {0x72B6, 0x6001, 0x81EA, 0x68C0};
+static const uint16_t g_device_sub_item_4[] = {0x5B9A, 0x4F4D, 0x6A21, 0x5757, 0x72B6, 0x6001};
+static const uint16_t g_device_sub_item_5[] = {0x6574, 0x8F66, 0x72B6, 0x6001};
+static const uint16_t g_device_sub_item_6[] = {0x5B58, 0x50A8, 0x5668, 0x68C0, 0x6D4B};
+static const uint16_t g_device_sub_item_7[] = {0x5F55, 0x97F3, 0x5F55, 0x50CF, 0x68C0, 0x6D4B};
+static const uint16_t g_device_sub_item_8[] = {0x901F, 0x5EA6, 0x67E5, 0x8BE2};
+static const uint16_t g_device_sub_item_9[] = {0x9A7E, 0x9A76, 0x5458, 0x72B6, 0x6001, 0x76D1, 0x63A7};
+
+static const uint16_t *const g_device_sub_item_texts_u8g2[] = {
+    g_device_sub_item_1, g_device_sub_item_2, g_device_sub_item_3,
+    g_device_sub_item_4, g_device_sub_item_5, g_device_sub_item_6,
+    g_device_sub_item_7, g_device_sub_item_8, g_device_sub_item_9
+};
+
+static const uint8_t g_device_sub_item_counts_u8g2[] = {5, 6, 4, 6, 4, 5, 6, 4, 7};
+
+static const uint16_t g_system_sub_item_1[] = {0x6309, 0x952E, 0x97F3, 0x91CF, 0x8BBE, 0x7F6E};
+static const uint16_t g_system_sub_item_2[] = {0x5C4F, 0x5E55, 0x4EAE, 0x5EA6, 0x8BBE, 0x7F6E};
+static const uint16_t g_system_sub_item_3[] = {0x8F66, 0x8F86, 0x4FE1, 0x606F, 0x8BBE, 0x7F6E};
+static const uint16_t g_system_sub_item_4[] = {0x4E3B, 0x673A, 0x53C2, 0x6570, 0x8BBE, 0x7F6E};
+static const uint16_t g_system_sub_item_5[] = {0x521D, 0x59CB, 0x91CC, 0x7A0B};
+static const uint16_t g_system_sub_item_6[] = {0x4E3B, 0x673A, 0x6CE8, 0x518C};
+static const uint16_t g_system_sub_item_7[] = {0x4E3B, 0x673A, 0x6CE8, 0x9500};
+static const uint16_t g_system_sub_item_8[] = {0x8BB0, 0x5F55, 0x4EEA, 0x8F6F, 0x4EF6, 0x7248, 0x672C};
+static const uint16_t g_system_sub_item_9[] = {0x5143, 0x5668, 0x4EF6, 0x8F6F, 0x4EF6, 0x7248, 0x672C};
+
+static const uint16_t *const g_system_sub_item_texts_u8g2[] = {
+    g_system_sub_item_1, g_system_sub_item_2, g_system_sub_item_3,
+    g_system_sub_item_4, g_system_sub_item_5, g_system_sub_item_6,
+    g_system_sub_item_7, g_system_sub_item_8, g_system_sub_item_9
+};
+
+static const uint8_t g_system_sub_item_counts_u8g2[] = {6, 6, 6, 6, 4, 4, 4, 7, 7};
 
 
 
@@ -639,6 +671,8 @@ static void lcd_u8g2_draw_submenu_item(u8g2_t *u8g2,
                                        rt_bool_t selected)
 {
     char prefix[4];
+    const uint16_t *const *submenu_texts = RT_NULL;
+    const uint8_t *submenu_counts = RT_NULL;
 
     if (selected == RT_TRUE) {
         u8g2_SetDrawColor(u8g2, 1);
@@ -653,12 +687,37 @@ static void lcd_u8g2_draw_submenu_item(u8g2_t *u8g2,
     u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
     u8g2_DrawStr(u8g2, 2, baseline_y, prefix);
 
+    switch (g_lcd_submenu_type) {
+    case LCD_SUBMENU_DRIVE_RECORD:
+        submenu_texts = g_drive_sub_item_texts_u8g2;
+        submenu_counts = g_drive_sub_item_counts_u8g2;
+        break;
+
+    case LCD_SUBMENU_DEVICE_STATUS:
+        submenu_texts = g_device_sub_item_texts_u8g2;
+        submenu_counts = g_device_sub_item_counts_u8g2;
+        break;
+
+    case LCD_SUBMENU_PARAM_CONFIG:
+        submenu_texts = g_system_sub_item_texts_u8g2;
+        submenu_counts = g_system_sub_item_counts_u8g2;
+        break;
+
+    default:
+        break;
+    }
+
+    if ((submenu_texts == RT_NULL) || (submenu_counts == RT_NULL)) {
+        u8g2_SetDrawColor(u8g2, 1);
+        return;
+    }
+
     u8g2_SetFont(u8g2, LCD_FONT_CN_12);
     lcd_u8g2_draw_unicode_seq(u8g2,
                               16,
                               baseline_y,
-                              g_drive_sub_item_texts_u8g2[index],
-                              g_drive_sub_item_counts_u8g2[index]);
+                              submenu_texts[index],
+                              submenu_counts[index]);
 
     u8g2_SetDrawColor(u8g2, 1);
 }
@@ -753,7 +812,11 @@ static void lcd_render_drive_record_submenu_ui(void)
 
         /* 标题仍显示“行驶记录” */
         u8g2_SetFont(u8g2, LCD_FONT_CN_12);
-        lcd_u8g2_draw_unicode_seq(u8g2, 2, 12, g_menu_item_text_1, 4);
+        lcd_u8g2_draw_unicode_seq(u8g2,
+                                  2,
+                                  12,
+                                  g_menu_item_texts_u8g2[g_lcd_menu_index],
+                                  g_menu_item_text_counts_u8g2[g_lcd_menu_index]);
 
         for (row = 0; row < row_count; row++) {
             uint8_t item_index = (uint8_t)(page_start + row);
@@ -846,10 +909,10 @@ static uint8_t lcd_get_submenu_max_index(lcd_submenu_type_t submenu_type)
         return 8U;
 
     case LCD_SUBMENU_DEVICE_STATUS:
-        return 0U;
+        return 8U;
 
     case LCD_SUBMENU_PARAM_CONFIG:
-        return 0U;
+        return 8U;
 
     default:
         return 0U;
@@ -1351,7 +1414,7 @@ static void svc_lcd_thread_entry(void *arg)
             }
 
             if (svc_adc_consume_s3_event() == RT_TRUE) {
-                if (g_lcd_menu_index < 6U) {
+                if (g_lcd_menu_index < 2U) {
                     g_lcd_menu_index++;
                     g_lcd_need_redraw = RT_TRUE;
                 }
@@ -1395,7 +1458,8 @@ static void svc_lcd_thread_entry(void *arg)
                 lcd_render_home_ui();
             } else if (g_lcd_menu_depth == 1U) {
                 lcd_render_menu_ui();
-            } else if ((g_lcd_menu_depth == 2U) && (g_lcd_submenu_type == LCD_SUBMENU_DRIVE_RECORD)) {
+            } else if ((g_lcd_menu_depth == 2U) &&
+                       (g_lcd_submenu_type != LCD_SUBMENU_NONE)) {
                 lcd_render_drive_record_submenu_ui();
             } else {
                 lcd_render_submenu_ui();
