@@ -1,7 +1,7 @@
 #include "app_usart_cmd.h"
 
 #include <string.h>
-
+#include "svc_storage.h"
 #include "app_config.h"
 #include "svc_lcd.h"
 
@@ -250,6 +250,82 @@ static uint32_t app_uart_cmd_read_le32(const uint8_t *buf)
 }
 
 
+static void app_uart_cmd_update_total_mileage(uint16_t speed_kmh_x10, uint32_t timestamp)
+{
+    static rt_bool_t has_last_sample = RT_FALSE;
+    static rt_bool_t storage_loaded = RT_FALSE;
+    static uint32_t last_timestamp = 0U;
+    static uint32_t odo_km = 0U;
+    static uint16_t odo_rem_m = 0U;
+    static uint32_t meter_num_acc = 0U; /* unit: 1/36 meter */
+    static uint32_t last_saved_odo_km = 0U;
+
+    svc_storage_mileage_t mileage_store;
+    uint32_t delta_sec;
+    uint32_t add_m;
+    uint32_t total_m;
+
+    if (storage_loaded == RT_FALSE) {
+        if (svc_storage_load_mileage(&mileage_store) == RT_TRUE) {
+            odo_km = mileage_store.odo_km;
+            odo_rem_m = mileage_store.odo_rem_m;
+            last_saved_odo_km = odo_km;
+        } else {
+            odo_km = 0U;
+            odo_rem_m = 0U;
+            last_saved_odo_km = 0U;
+        }
+
+        storage_loaded = RT_TRUE;
+        svc_lcd_update_total_mileage(odo_km, odo_rem_m);
+    }
+
+    if (has_last_sample == RT_FALSE) {
+        has_last_sample = RT_TRUE;
+        last_timestamp = timestamp;
+        return;
+    }
+
+    if (timestamp <= last_timestamp) {
+        last_timestamp = timestamp;
+        return;
+    }
+
+    delta_sec = timestamp - last_timestamp;
+    last_timestamp = timestamp;
+
+    /* Avoid a large jump after link interruption. */
+    if (delta_sec > 5U) {
+        return;
+    }
+
+    /*
+     * speed_kmh_x10 unit: 0.1 km/h
+     * distance(m) = speed_kmh_x10 * delta_sec / 36
+     * Keep the 1/36 meter remainder to avoid truncation loss.
+     */
+    meter_num_acc += (uint32_t)speed_kmh_x10 * delta_sec;
+
+    add_m = meter_num_acc / 36U;
+    meter_num_acc %= 36U;
+
+    total_m = (uint32_t)odo_rem_m + add_m;
+    odo_km += total_m / 1000U;
+    odo_rem_m = (uint16_t)(total_m % 1000U);
+
+    svc_lcd_update_total_mileage(odo_km, odo_rem_m);
+
+    if ((odo_km - last_saved_odo_km) >= 1U) {
+        mileage_store.odo_km = odo_km;
+        mileage_store.odo_rem_m = odo_rem_m;
+        mileage_store.reserved = 0U;
+
+        if (svc_storage_save_mileage(&mileage_store) == RT_TRUE) {
+            last_saved_odo_km = odo_km;
+        }
+    }
+}
+
 
 
 
@@ -433,6 +509,7 @@ void app_usart_cmd_poll(void)
         app_uart_cmd_time_to_hms(msg.timestamp, &hour, &minute, &second);
         app_uart_cmd_seconds_to_hms(msg.driver_time, &drive_hour, &drive_minute, &drive_second);
         app_uart_cmd_bcd_to_str18(msg.driver_number, driver_number_str);
+        app_uart_cmd_update_total_mileage(msg.driver_speed, msg.timestamp);
 
 
         rt_kprintf("[uart_cmd][soc] cam=%u%u%u%u rec=%u loc=%u ic=%u udisk=%u ip=%u%u gsm=%u sim=%u sat=%u total=%luKB free=%luKB ts=0x%08X drv=%lu spd=%u driver=%s\n",

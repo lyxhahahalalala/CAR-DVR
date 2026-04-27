@@ -33,6 +33,7 @@ void svc_lcd_update_home_speed(uint16_t speed_kmh_x10);
 void svc_lcd_update_drive_time(uint8_t hour, uint8_t minute, uint8_t second);
 void svc_lcd_update_card_id(const char *card_id);
 void svc_lcd_update_overtime_drive_count(uint16_t count);
+void svc_lcd_update_total_mileage(uint32_t odo_km, uint16_t odo_rem_m);
 
 
 

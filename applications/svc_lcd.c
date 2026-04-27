@@ -521,6 +521,8 @@ static lcd_submenu_type_t g_lcd_submenu_type = LCD_SUBMENU_NONE;
 static uint8_t g_lcd_menu_depth = 0U; /* 0=home, 1=menu list, 2/3/4=subpages */
 static rt_bool_t g_lcd_need_redraw = RT_TRUE;
 static uint16_t g_lcd_overtime_drive_count = 0U;//超时驾驶记录
+static uint32_t g_lcd_total_mileage_km = 0U;
+static uint16_t g_lcd_total_mileage_rem_m = 0U;
 
 
 
@@ -917,6 +919,38 @@ static void lcd_render_fatigue_drive_record_ui(void)
     u8g2_port_flush_buffer();
 }
 
+static void lcd_render_drive_mileage_ui(void)
+{
+    u8g2_t *u8g2;
+    char mileage_str[24];
+    static const uint16_t g_title_text[] = {
+        0x7D2F, 0x8BA1, 0x884C, 0x9A76, 0x91CC, 0x7A0B /* 累计行驶里程 */
+    };
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 16, g_title_text, 6);
+
+    rt_snprintf(mileage_str, sizeof(mileage_str), "%lu.%03u km",
+                (unsigned long)g_lcd_total_mileage_km,
+                (unsigned int)g_lcd_total_mileage_rem_m);
+
+    u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+    u8g2_DrawStr(u8g2, 2, 38, mileage_str);
+
+    u8g2_port_flush_buffer();
+}
+
+
 static void lcd_render_location_status_ui(void)
 {
     u8g2_t *u8g2;
@@ -1140,6 +1174,18 @@ void svc_lcd_update_overtime_drive_count(uint16_t count)
     }
 }
 
+void svc_lcd_update_total_mileage(uint32_t odo_km, uint16_t odo_rem_m)
+{
+    if ((g_lcd_total_mileage_km != odo_km) ||
+        (g_lcd_total_mileage_rem_m != odo_rem_m)) {
+        g_lcd_total_mileage_km = odo_km;
+        g_lcd_total_mileage_rem_m = odo_rem_m;
+
+        if (g_lcd_menu_mode == RT_TRUE) {
+            g_lcd_need_redraw = RT_TRUE;
+        }
+    }
+}
 
 
 static void lcd_fb_flush(void)
@@ -1584,12 +1630,14 @@ static void svc_lcd_thread_entry(void *arg)
                 } else if ((g_lcd_submenu_type == LCD_SUBMENU_DRIVE_RECORD) &&
                            (g_lcd_submenu_index == 1U)) {
                     lcd_render_location_status_ui();
+                } else if ((g_lcd_submenu_type == LCD_SUBMENU_DRIVE_RECORD) &&
+                           (g_lcd_submenu_index == 2U)) {
+                    lcd_render_drive_mileage_ui();
                 } else {
                     lcd_render_submenu_ui();
                 }
-            } else {
-                lcd_render_submenu_ui();
             }
+
 
             g_lcd_need_redraw = RT_FALSE;
         }

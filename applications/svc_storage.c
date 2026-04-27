@@ -3,6 +3,14 @@
 #include "app_config.h"
 #include "svc_storage.h"
 
+
+static svc_storage_mileage_t g_storage_mileage_shadow = {
+    .odo_km = 0U,
+    .odo_rem_m = 0U,
+    .reserved = 0U
+};
+
+
 static void svc_storage_thread_entry(void *arg)
 {
     RT_UNUSED(arg);
@@ -39,4 +47,35 @@ int svc_storage_task_start(void)
 
     rt_thread_startup(thread);
     return RT_EOK;
+}
+
+
+rt_bool_t svc_storage_load_mileage(svc_storage_mileage_t *mileage)
+{
+    if (mileage == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    *mileage = g_storage_mileage_shadow;
+    return RT_TRUE;
+}
+
+rt_bool_t svc_storage_save_mileage(const svc_storage_mileage_t *mileage)
+{
+    if (mileage == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    g_storage_mileage_shadow = *mileage;
+
+    /*
+     * TODO:
+     * Replace this shadow write with real EEPROM/NVM write.
+     * Example flow:
+     * 1. serialize mileage struct
+     * 2. write to EEPROM fixed address
+     * 3. optionally verify by readback
+     */
+
+    return RT_TRUE;
 }
