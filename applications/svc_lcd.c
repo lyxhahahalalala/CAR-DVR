@@ -520,6 +520,7 @@ static uint8_t g_lcd_submenu_index = 0U;
 static lcd_submenu_type_t g_lcd_submenu_type = LCD_SUBMENU_NONE;
 static uint8_t g_lcd_menu_depth = 0U; /* 0=home, 1=menu list, 2/3/4=subpages */
 static rt_bool_t g_lcd_need_redraw = RT_TRUE;
+static uint16_t g_lcd_overtime_drive_count = 0U;//超时驾驶记录
 
 
 
@@ -885,6 +886,88 @@ static void lcd_render_submenu_ui(void)
     u8g2_port_flush_buffer();
 }
 
+static void lcd_render_fatigue_drive_record_ui(void)
+{
+    u8g2_t *u8g2;
+    char count_str[12];
+    static const uint16_t g_title_text[] = {
+        0x8D85, 0x65F6, 0x9A7E, 0x9A76, 0x8BB0, 0x5F55 /* 超时驾驶记录 */
+    };
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 16, g_title_text, 6);
+    u8g2_DrawStr(u8g2, 74, 16, ":");
+
+    rt_snprintf(count_str, sizeof(count_str), "%u",
+                (unsigned int)g_lcd_overtime_drive_count);
+
+    u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+    u8g2_DrawStr(u8g2, 86, 16, count_str);
+
+    u8g2_port_flush_buffer();
+}
+
+static void lcd_render_location_status_ui(void)
+{
+    u8g2_t *u8g2;
+    char satellite_str[8];
+    char speed_value_str[16];
+    static const uint16_t g_satellite_text[] = {
+        0x536B, 0x661F /* 卫星 */
+    };
+    static const uint16_t g_loc_ok_text[] = {
+        0x5DF2, 0x5B9A, 0x4F4D /* 已定位 */
+    };
+    static const uint16_t g_loc_ng_text[] = {
+        0x672A, 0x5B9A, 0x4F4D /* 未定位 */
+    };
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    rt_snprintf(satellite_str, sizeof(satellite_str), "%02u",
+                (unsigned int)g_lcd_home_ui.top_status_value);
+
+    rt_snprintf(speed_value_str, sizeof(speed_value_str), "%u.%u km/h",
+                (unsigned int)(g_lcd_home_ui.speed_kmh_x10 / 10U),
+                (unsigned int)(g_lcd_home_ui.speed_kmh_x10 % 10U));
+
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 16, g_satellite_text, 2);
+    u8g2_DrawStr(u8g2, 28, 16, ":");
+
+    u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+    u8g2_DrawStr(u8g2, 36, 16, satellite_str);
+    u8g2_DrawStr(u8g2, 72, 16, speed_value_str);
+
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+    if (g_lcd_home_ui.top_status_value == 0U) {
+        lcd_u8g2_draw_unicode_seq(u8g2, 2, 38, g_loc_ng_text, 3);
+    } else {
+        lcd_u8g2_draw_unicode_seq(u8g2, 2, 38, g_loc_ok_text, 3);
+    }
+
+    u8g2_port_flush_buffer();
+}
+
+
 static lcd_submenu_type_t lcd_get_submenu_type_from_menu_index(uint8_t menu_index)
 {
     switch (menu_index) {
@@ -1045,6 +1128,18 @@ void svc_lcd_update_card_id(const char *card_id)
                                g_lcd_home_ui.drive_second,
                                card_id);
 }
+
+void svc_lcd_update_overtime_drive_count(uint16_t count)
+{
+    if (g_lcd_overtime_drive_count != count) {
+        g_lcd_overtime_drive_count = count;
+
+        if (g_lcd_menu_mode == RT_TRUE) {
+            g_lcd_need_redraw = RT_TRUE;
+        }
+    }
+}
+
 
 
 static void lcd_fb_flush(void)
@@ -1444,7 +1539,22 @@ static void svc_lcd_thread_entry(void *arg)
                     g_lcd_menu_mode = RT_TRUE;
                     g_lcd_need_redraw = RT_TRUE;
                 }
-            } else if (g_lcd_menu_depth >= 2U) {
+            } else if (g_lcd_menu_depth == 2U) {
+                /* 一级子界面下的条目先都允许进入二级子界面 */
+                g_lcd_menu_depth = 3U;
+                g_lcd_menu_mode = RT_TRUE;
+                g_lcd_need_redraw = RT_TRUE;
+            } else if (g_lcd_menu_depth == 3U) {
+                /* 只有“行驶记录 -> 疲劳驾驶”这一路到此为止 */
+                if ((g_lcd_submenu_type == LCD_SUBMENU_DRIVE_RECORD) &&
+                    (g_lcd_submenu_index == 0U)) {
+                    /* do nothing */
+                } else if (g_lcd_menu_depth < 4U) {
+                    g_lcd_menu_depth++;
+                    g_lcd_menu_mode = RT_TRUE;
+                    g_lcd_need_redraw = RT_TRUE;
+                }
+            } else if (g_lcd_menu_depth > 3U) {
                 if (g_lcd_menu_depth < 4U) {
                     g_lcd_menu_depth++;
                     g_lcd_menu_mode = RT_TRUE;
@@ -1453,20 +1563,38 @@ static void svc_lcd_thread_entry(void *arg)
             }
         }
 
+
+
+
         if (g_lcd_need_redraw == RT_TRUE) {
             if (g_lcd_menu_depth == 0U) {
                 lcd_render_home_ui();
             } else if (g_lcd_menu_depth == 1U) {
                 lcd_render_menu_ui();
-            } else if ((g_lcd_menu_depth == 2U) &&
-                       (g_lcd_submenu_type != LCD_SUBMENU_NONE)) {
-                lcd_render_drive_record_submenu_ui();
+            } else if (g_lcd_menu_depth == 2U) {
+                if (g_lcd_submenu_type != LCD_SUBMENU_NONE) {
+                    lcd_render_drive_record_submenu_ui();
+                } else {
+                    lcd_render_submenu_ui();
+                }
+            } else if (g_lcd_menu_depth == 3U) {
+                if ((g_lcd_submenu_type == LCD_SUBMENU_DRIVE_RECORD) &&
+                    (g_lcd_submenu_index == 0U)) {
+                    lcd_render_fatigue_drive_record_ui();
+                } else if ((g_lcd_submenu_type == LCD_SUBMENU_DRIVE_RECORD) &&
+                           (g_lcd_submenu_index == 1U)) {
+                    lcd_render_location_status_ui();
+                } else {
+                    lcd_render_submenu_ui();
+                }
             } else {
                 lcd_render_submenu_ui();
             }
 
             g_lcd_need_redraw = RT_FALSE;
         }
+
+
 
         rt_thread_mdelay(10);
     }
