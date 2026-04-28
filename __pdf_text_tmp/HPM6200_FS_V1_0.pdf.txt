@@ -1,0 +1,226 @@
+HPM6200 
+
+Rev 1.0
+HPM6200  MCU  RISC-V  HPM6200  100ps  PWM  PLA
+
+ · RISC-V  DSP   600 MHz 3390 CoreMarkT M  1710 DMIPS · 32KB  (I/D Cache)  512KB   (ILM / DLM) 256KB  SRAM   PWM  · 4  8  PWM  2  PWM   100ps · 2  PLA  · 1  NOR Flash / HyperFlash NOR Flash    ·  DCDC  LDO,  -  ·  ·   · 1  PHY  USB 4  CAN/CAN-FD4  LIN  UARTSPI I2C  ·   SDM SINC   
+
+· 3  2MSPS 16  ADC 12   4MSPS 24 4   2  1MSPS 12  DAC ·  20  32 5  RTC
+ ·  AES-128/256, SHA-1/256    ·   ·  Boot ROM USB  UART  
+
+
+
+DCDC
+
+LDOPMC LDOOTP
+
+LDOBAT
+
+POR/BOR
+
+ PLL x3
+
+OSC 24M
+
+IRC 24M
+
+OSC 32K
+
+IRC 32K
+
+
+
+DMAx2
+
+WDG x5
+
+MBX
+
+RTC
+
+JTAG
+
+CRC
+
+ RAM 256KB
+RAM 32KB ROM 128KB OTP 4Kb
+
+ 4b/8b NORRFALMAS3H2KxB1
+
+
+
+RISC-V CPU 0
+
+32KB L1-I 32KB L1-D
+
+FPU
+
+DSP PLIC
+
+128KB ILM 128KB DLM
+
+RISC-V CPU 1
+
+32KB L1-I 32KB L1-D
+
+FPU
+
+DSP
+
+PLIC
+
+128KB ILM 128KB DLM
+
+ 16b ADC 2Msps x3 x4 
+12b DAC x2
+
+ 32x5
+
+ GPIO
+GPIO
+
+
+
+UART x9
+
+SPI x4
+
+I2C x4
+
+LIN x4
+
+CAN FD x4 USB HS w/PHY
+
+ ¡ 
+
+
+
+100ps PWM 8ch x2 2.5ns PWM 8ch x2
+
+ PLA x2
+¢£
+SDM
+x4 x4
+ x4
+
+ EXIP 
+
+AES/SM4/SHA/SM3
+
+
+
+TRNG
+
+
+
+
+
+ /
+
+HPM6200 
+ RISC-V  32 
+
+ CPU0 CPU1
+  
+USB CAN UART/SPI/I2C HR PWM PWM 
+
+SDM  
+
+HPM6280
+
+HPM6260
+
+HPM6240
+
+HPM6284
+
+HPM6264
+
+HPM6220
+
+600MHz
+
+600MHz
+
+600MHz
+
+600MHz
+
+600 MHz
+
+300MHz
+
+600MHz
+
+/
+
+/
+
+600MHz
+
+/
+
+/
+
+800 KB SRAM
+
+/
+
+4 MB
+
+/
+
+AES128/256SHA-1/256TRNGJTAG 
+
+1  USB PHY
+
+4× CAN FD 4× CAN FD 4× CAN FD 4× CAN FD 4× CAN FD
+
+/
+
+9× / 4× / 4×
+
+6× / 3× / 3×
+
+2×8CH 100ps
+
+/
+
+2×8CH 100ps
+
+2×8CH 2.5ns
+
+4×8CH 2.5ns
+
+2×8CH 2.5ns
+
+4× 4×HALL 
+
+/
+
+3×16b/2Msps (12b/4Msps) ADC, 4×ACMP, 2×12b DAC
+
+1×ADC, 2×ACMP
+
+4    SINC 
+
+20×20 144 eLQFP P0.57×7 116 BGA P0.5
+
+-40  125C Tj / -40  105C Ta
+
+
+
+ 
+ 
+
+HPM6200EVK 128Mbit NOR Flash SMA ADC  SMA  PWM  1  USB Type-C   2  40 pin   JTAG 
+
+  BSD  SDK  RTOS lwIP/TinyUSB/FreeRTOS  SDK  RT-Thread/Zephyr  Segger Embedded Studio for RISC-V   VS Code   HPM Studio  PC  SoC   MCU   info@hpmicro.com https://www.hpmicro.com :
+
+©Shanghai HPMicro Semiconductor Co., Ltd.
+
+/
+
+Rev1.0
+
+
