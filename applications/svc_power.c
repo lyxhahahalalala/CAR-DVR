@@ -14,7 +14,8 @@
 
 #define SVC_POWER_CTRL_GPIO              HPM_GPIO0
 
-#define SVC_POWER_CTRL_GPIO_INDEX        GPIO_DO_GPIOC
+#define SVC_POWER_CTRL_GPIOC_INDEX        GPIO_DO_GPIOC
+#define SVC_POWER_CTRL_GPIOA_INDEX       GPIO_DO_GPIOA
 
 #define SVC_POWER_CTRL_PWREN_24V_PIN     11
 
@@ -24,9 +25,7 @@
 
 #define SVC_POWER_CTRL_PWR_HOLD_PIN      14
 
-#define SVC_POWER_WK_ON_GPIO_CTRL         HPM_GPIO0
-#define SVC_POWER_WK_ON_GPIO_INDEX        GPIO_DI_GPIOC
-#define SVC_POWER_WK_ON_PIN               19
+#define SVC_POWER_CTRL_CAM_12V_EN_PIN    23
 
 typedef enum
 {
@@ -80,8 +79,10 @@ static rt_uint8_t g_supercap_low_confirm_count = 0;
 static rt_bool_t g_final_soc_cut_done = RT_FALSE;
 
 static rt_bool_t g_final_hold_cut_done = RT_FALSE;
-static rt_bool_t g_soc_en_state = RT_FALSE;
-static rt_tick_t g_wk_on_rise_tick = 0;
+
+static rt_tick_t g_cam_12v_enable_start_tick = 0;
+static rt_bool_t g_cam_12v_enabled = RT_FALSE;
+
 
 void rt_hw_cpu_reset(void);
 static rt_bool_t svc_power_is_shutdown_flow_stage(svc_power_stage_t stage);
@@ -161,87 +162,45 @@ static void svc_power_init_ctrl_pins(void)
     HPM_IOC->PAD[IOC_PAD_PC11].FUNC_CTL = IOC_PC11_FUNC_CTL_GPIO_C_11;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 11, gpiom_soc_gpio0);
     gpio_set_pin_output(SVC_POWER_CTRL_GPIO, GPIO_OE_GPIOC, SVC_POWER_CTRL_PWREN_24V_PIN);
-    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWREN_24V_PIN, 1);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIOC_INDEX, SVC_POWER_CTRL_PWREN_24V_PIN, 1);
 
     
     HPM_IOC->PAD[IOC_PAD_PC12].FUNC_CTL = IOC_PC12_FUNC_CTL_GPIO_C_12;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 12, gpiom_soc_gpio0);
     gpio_set_pin_output(SVC_POWER_CTRL_GPIO, GPIO_OE_GPIOC, SVC_POWER_CTRL_PWREN_SOC_PIN);
-    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWREN_SOC_PIN, 1);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIOC_INDEX, SVC_POWER_CTRL_PWREN_SOC_PIN, 1);
 
     
     HPM_IOC->PAD[IOC_PAD_PC13].FUNC_CTL = IOC_PC13_FUNC_CTL_GPIO_C_13;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 13, gpiom_soc_gpio0);
     gpio_set_pin_output(SVC_POWER_CTRL_GPIO, GPIO_OE_GPIOC, SVC_POWER_CTRL_SUPERCAP_CHRG_PIN);
-#if APP_PWR_SUPERCAP_MGMT_ENABLE
-    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_SUPERCAP_CHRG_PIN, 1);
-#else
-    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_SUPERCAP_CHRG_PIN, 0);
-#endif
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIOC_INDEX, SVC_POWER_CTRL_SUPERCAP_CHRG_PIN, 1);
 
     
     HPM_IOC->PAD[IOC_PAD_PC14].FUNC_CTL = IOC_PC14_FUNC_CTL_GPIO_C_14;
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 14, gpiom_soc_gpio0);
     gpio_set_pin_output(SVC_POWER_CTRL_GPIO, GPIO_OE_GPIOC, SVC_POWER_CTRL_PWR_HOLD_PIN);
-    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWR_HOLD_PIN, 1);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIOC_INDEX, SVC_POWER_CTRL_PWR_HOLD_PIN, 1);
+
+    HPM_IOC->PAD[IOC_PAD_PA23].FUNC_CTL = IOC_PA23_FUNC_CTL_GPIO_A_23;
+    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, SVC_POWER_CTRL_CAM_12V_EN_PIN, gpiom_soc_gpio0);
+    gpio_set_pin_output(SVC_POWER_CTRL_GPIO, GPIO_OE_GPIOA, SVC_POWER_CTRL_CAM_12V_EN_PIN);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIOA_INDEX, SVC_POWER_CTRL_CAM_12V_EN_PIN, 0);
+
 }
 
 static void svc_power_cut_soc_outputs(void)
 {
-    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWREN_SOC_PIN, 0);
-    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWREN_24V_PIN, 0);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIOC_INDEX, SVC_POWER_CTRL_PWREN_SOC_PIN, 0);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIOC_INDEX, SVC_POWER_CTRL_PWREN_24V_PIN, 0);
 #if APP_PWR_SUPERCAP_MGMT_ENABLE
-    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_SUPERCAP_CHRG_PIN, 0);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIOC_INDEX, SVC_POWER_CTRL_SUPERCAP_CHRG_PIN, 0);
 #endif
-}
-
-static void svc_power_set_soc_en(rt_bool_t enable)
-{
-    rt_uint8_t level = enable ? 1U : 0U;
-
-    if (g_soc_en_state == enable)
-    {
-        return;
-    }
-
-    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWREN_SOC_PIN, level);
-    g_soc_en_state = enable;}
-
-static rt_bool_t svc_power_is_wk_on_raw(void)
-{
-    rt_uint32_t raw_level;
-
-    raw_level = gpio_read_pin(SVC_POWER_WK_ON_GPIO_CTRL, SVC_POWER_WK_ON_GPIO_INDEX, SVC_POWER_WK_ON_PIN);
-    return (raw_level == 0U);
-}
-
-static void svc_power_update_soc_en_by_wk_on(svc_power_stage_t stage)
-{
-    rt_bool_t wk_on;
-
-    wk_on = svc_power_is_wk_on_raw();
-
-    if ((!wk_on) || svc_power_is_shutdown_flow_stage(stage) || (stage == SVC_POWER_STAGE_MAIN_OFF))
-    {
-        g_wk_on_rise_tick = 0;
-        svc_power_set_soc_en(RT_FALSE);
-        return;
-    }
-
-    if (g_wk_on_rise_tick == 0)
-    {
-        g_wk_on_rise_tick = rt_tick_get();
-    }
-
-    if (svc_power_ticks_to_ms(g_wk_on_rise_tick) >= APP_PWR_SOC_ON_DELAY_MS)
-    {
-        svc_power_set_soc_en(RT_TRUE);
-    }
 }
 
 static void svc_power_release_mcu_hold(void)
 {
-    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIO_INDEX, SVC_POWER_CTRL_PWR_HOLD_PIN, 0);
+    gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIOC_INDEX, SVC_POWER_CTRL_PWR_HOLD_PIN, 0);
 }
 
 static rt_bool_t svc_power_is_main_present_raw(const app_adc_snapshot_t *adc_snapshot)
@@ -536,6 +495,21 @@ static void svc_power_handle_stage_transition(svc_power_stage_t new_stage)
     g_power_stage = new_stage;
 }
 
+static void svc_power_handle_cam_12v_enable(void)
+{
+    if (g_cam_12v_enabled)
+    {
+        return;
+    }
+
+    if (svc_power_ticks_to_ms(g_cam_12v_enable_start_tick) >= APP_CAM_12V_ENABLE_DELAY_MS)
+    {
+        gpio_write_pin(SVC_POWER_CTRL_GPIO, SVC_POWER_CTRL_GPIOA_INDEX, SVC_POWER_CTRL_CAM_12V_EN_PIN, 1);
+        g_cam_12v_enabled = RT_TRUE;
+    }
+}
+
+
 static void svc_power_thread_entry(void *arg)
 {
     RT_UNUSED(arg);
@@ -545,7 +519,6 @@ static void svc_power_thread_entry(void *arg)
         const app_adc_snapshot_t *adc_snapshot;
         const app_vehicle_io_state_t *vehicle_state;
         svc_power_stage_t power_stage;
-        rt_uint32_t hold_ms;
 
         
         adc_snapshot = svc_adc_get_snapshot();
@@ -562,9 +535,8 @@ static void svc_power_thread_entry(void *arg)
         
         svc_power_handle_final_power_cut();
 
+        svc_power_handle_cam_12v_enable();
         
-        hold_ms = svc_power_get_hold_elapsed_ms();        svc_power_update_soc_en_by_wk_on(power_stage);
-
         rt_thread_mdelay(APP_POWER_TASK_PERIOD_MS);
     }
 }
@@ -588,8 +560,10 @@ int svc_power_init(void)
     g_supercap_low_confirm_count = 0;
     g_final_soc_cut_done = RT_FALSE;
     g_final_hold_cut_done = RT_FALSE;
-    g_soc_en_state = RT_FALSE;
-    g_wk_on_rise_tick = 0;
+
+    g_cam_12v_enable_start_tick = rt_tick_get();
+    g_cam_12v_enabled = RT_FALSE;
+
 
     return RT_EOK;
 }

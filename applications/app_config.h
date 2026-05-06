@@ -128,6 +128,9 @@
 
 #define APP_PWR_SOC_ON_DELAY_MS                      5000UL
 
+#define APP_CAM_12V_ENABLE_DELAY_MS              5000UL
+
+
 /* 周期任务节拍 */
 #define APP_POWER_TASK_PERIOD_MS     100
 #define APP_CAN_TASK_PERIOD_MS       1200

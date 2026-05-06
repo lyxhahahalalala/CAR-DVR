@@ -5,6 +5,9 @@
 #include "app_config.h"
 #include "svc_lcd.h"
 
+
+
+
 typedef struct
 {
     uint8_t buf[APP_UART_CMD_RX_BUF_SIZE];
@@ -19,6 +22,7 @@ static app_uart_cmd_tx_fn_t g_uart_cmd_tx_cb = RT_NULL;
 static rt_device_t g_uart_cmd_dev = RT_NULL;
 static struct rt_semaphore g_uart_cmd_rx_sem;
 
+/*，中正平和*/
 static rt_bool_t app_uart_cmd_ring_push(app_uart_cmd_ring_t *ring, uint8_t byte)
 {
     if ((ring == RT_NULL) || (ring->count >= APP_UART_CMD_RX_BUF_SIZE)) {
@@ -443,6 +447,8 @@ int app_usart_cmd_task_start(void)
     }
 
     rt_thread_startup(thread);
+    app_uart_cmd_update_total_mileage(0U, 1U);
+
     return RT_EOK;
 }
 
