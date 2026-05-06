@@ -5,6 +5,12 @@
 #include <rtdevice.h>
 #include <stdint.h>
 
+#if defined(__GNUC__)
+#define APP_PACKED_STRUCT __attribute__((packed))
+#else
+#define APP_PACKED_STRUCT
+#endif
+
 #define APP_UART_CMD_DEV_NAME            "uart3"
 #define APP_UART_CMD_FRAME_HEAD          0xAAU
 #define APP_UART_CMD_FRAME_TAIL          0x55U
@@ -12,11 +18,24 @@
 #define APP_UART_CMD_RX_BUF_SIZE         256U
 #define APP_UART_CMD_ACK_RET_OK          1U
 #define APP_UART_CMD_ACK_RET_ERR         0U
+#define APP_UART_CMD_TYPE_MCU_VERSION    0x11U
+
+
 
 #define APP_UART_CMD_TASK_NAME           "uart_cmd"
 #define APP_UART_CMD_TASK_STACK_SIZE     1024
 #define APP_UART_CMD_TASK_PRIORITY       18
 #define APP_UART_CMD_TASK_TICK           10
+
+#define APP_UART_CMD_VERSION_TX_THREAD_NAME      "uart_ver"
+#define APP_UART_CMD_VERSION_TX_STACK_SIZE       1024
+#define APP_UART_CMD_VERSION_TX_PRIORITY         19
+#define APP_UART_CMD_VERSION_TX_TICK             10
+#define APP_UART_CMD_VERSION_TX_PERIOD_MS        1000U
+
+#define APP_UART_CMD_TYPE_SOC_STATUS     0x00U
+#define APP_UART_CMD_TYPE_MCU_VERSION    0x11U
+
 
 typedef struct
 {
@@ -39,7 +58,9 @@ typedef struct
     uint8_t ip2_connected   : 1;// IP2连接状态
     uint8_t gsm_connected   : 1;// GSM连接状态
     uint8_t protect_storage : 1;// 防护存储器状态
-    uint8_t reserved        : 4;
+    uint8_t sdcard_status   : 1;
+    uint8_t sim_status      : 1;
+    uint8_t reserved        : 2;
 
     uint8_t driver_number[9];// 驾驶员证号，BCD码
     uint32_t total_capacity;// 安全存储器总容量(KB)
@@ -68,5 +89,7 @@ void app_usart_cmd_poll(void);
 
 const app_uart_cmd_frame_t *app_usart_cmd_get_last_frame(void);
 rt_bool_t app_usart_cmd_send_ack(uint8_t type, uint8_t ret);
+rt_bool_t app_usart_cmd_send_mcu_version(void);
+
 
 #endif /* APPLICATIONS_APP_USART_CMD_H_ */

@@ -22,7 +22,25 @@ static app_uart_cmd_tx_fn_t g_uart_cmd_tx_cb = RT_NULL;
 static rt_device_t g_uart_cmd_dev = RT_NULL;
 static struct rt_semaphore g_uart_cmd_rx_sem;
 
-/*，中正平和*/
+typedef struct APP_PACKED_STRUCT
+{
+    uint8_t major;
+    uint8_t minor;
+    uint8_t patch;
+} app_mcu_version_t;
+
+typedef struct APP_PACKED_STRUCT
+{
+    uint8_t head;
+    uint8_t length;
+    uint8_t type;
+    app_mcu_version_t version;
+    uint8_t crc_l;
+    uint8_t crc_h;
+    uint8_t tail;
+} app_mcu_version_frame_t;
+
+
 static rt_bool_t app_uart_cmd_ring_push(app_uart_cmd_ring_t *ring, uint8_t byte)
 {
     if ((ring == RT_NULL) || (ring->count >= APP_UART_CMD_RX_BUF_SIZE)) {
@@ -57,6 +75,62 @@ static void app_uart_cmd_dump_frame(const uint8_t *buf, uint8_t len)
     }
     rt_kprintf("\n");
 }
+
+
+static uint16_t app_uart_cmd_crc16(const uint8_t *data, uint16_t len)
+{
+    static const uint16_t crc16_half_byte[16] = {
+        0x0000U, 0x1021U, 0x2042U, 0x3063U,
+        0x4084U, 0x50A5U, 0x60C6U, 0x70E7U,
+        0x8108U, 0x9129U, 0xA14AU, 0xB16BU,
+        0xC18CU, 0xD1ADU, 0xE1CEU, 0xF1EFU
+    };
+
+    uint8_t da;
+    uint16_t crc = 0U;
+    uint16_t i;
+
+    if (data == RT_NULL) {
+        return 0U;
+    }
+
+    for (i = 0U; i < len; i++) {
+        da = (uint8_t)((crc >> 8) >> 4);
+        crc <<= 4;
+        crc ^= crc16_half_byte[da ^ (data[i] >> 4)];
+
+        da = (uint8_t)((crc >> 8) >> 4);
+        crc <<= 4;
+        crc ^= crc16_half_byte[da ^ (data[i] & 0x0FU)];
+    }
+
+    return crc;
+}
+
+static rt_bool_t app_uart_cmd_check_crc(const uint8_t *buf, uint8_t len)
+{
+    uint16_t calc_crc;
+    uint16_t recv_crc;
+    uint8_t data_len;
+
+    if ((buf == RT_NULL) || (len < 6U)) {
+        return RT_FALSE;
+    }
+
+    /*
+     * Frame: AA LEN CMD DATA CRC_L CRC_H 55
+     * CRC range: DATA only.
+     */
+    data_len = (uint8_t)(len - 6U);
+
+    calc_crc = app_uart_cmd_crc16(&buf[3], data_len);
+    recv_crc = (uint16_t)buf[len - 3U] |
+               ((uint16_t)buf[len - 2U] << 8);
+
+    return (calc_crc == recv_crc) ? RT_TRUE : RT_FALSE;
+}
+
+
 
 static rt_bool_t app_uart_cmd_try_parse_frame(app_uart_cmd_frame_t *frame)
 {
@@ -94,7 +168,8 @@ static rt_bool_t app_uart_cmd_try_parse_frame(app_uart_cmd_frame_t *frame)
             temp[index++] = byte;
 
             if (index >= expect_len) {
-                if (temp[expect_len - 1U] == APP_UART_CMD_FRAME_TAIL) {
+                if ((temp[expect_len - 1U] == APP_UART_CMD_FRAME_TAIL) &&
+                    (app_uart_cmd_check_crc(temp, expect_len) == RT_TRUE)) {
                     frame->length = expect_len;
                     rt_memcpy(frame->data, temp, expect_len);
 
@@ -104,10 +179,13 @@ static rt_bool_t app_uart_cmd_try_parse_frame(app_uart_cmd_frame_t *frame)
                     return RT_TRUE;
                 }
 
+                rt_kprintf("[uart_cmd][crc/tail err] len=%u\n", expect_len);
+
                 state = 0U;
                 index = 0U;
                 expect_len = 0U;
             }
+
             break;
 
         default:
@@ -123,6 +201,8 @@ static rt_bool_t app_uart_cmd_try_parse_frame(app_uart_cmd_frame_t *frame)
 
 static uint16_t app_uart_cmd_build_ack(uint8_t type, uint8_t ret, uint8_t *buf, uint16_t buf_size)
 {
+    uint16_t crc;
+
     if ((buf == RT_NULL) || (buf_size < 8U)) {
         return 0U;
     }
@@ -132,12 +212,98 @@ static uint16_t app_uart_cmd_build_ack(uint8_t type, uint8_t ret, uint8_t *buf, 
     buf[2] = type;
     buf[3] = ret;
     buf[4] = 0U;
-    buf[5] = 0U;
-    buf[6] = 0U;
+
+    crc = app_uart_cmd_crc16(&buf[3], 2U);
+    buf[5] = (uint8_t)(crc & 0xFFU);
+    buf[6] = (uint8_t)(crc >> 8);
     buf[7] = APP_UART_CMD_FRAME_TAIL;
 
     return 8U;
 }
+
+
+
+
+static void app_uart_cmd_parse_version(app_mcu_version_t *version)
+{
+    const char *p = APP_SOFTWARE_VERSION;
+    uint8_t index = 0U;
+    uint16_t value = 0U;
+    rt_bool_t has_digit = RT_FALSE;
+    uint8_t values[3] = {0U, 0U, 0U};
+
+    if (version == RT_NULL) {
+        return;
+    }
+
+    version->major = 0U;
+    version->minor = 0U;
+    version->patch = 0U;
+
+    if (p == RT_NULL) {
+        return;
+    }
+
+    if ((*p == 'V') || (*p == 'v')) {
+        p++;
+    }
+
+    while ((*p != '\0') && (index < 3U)) {
+        if ((*p >= '0') && (*p <= '9')) {
+            value = (uint16_t)(value * 10U + (uint16_t)(*p - '0'));
+            has_digit = RT_TRUE;
+        } else if (*p == '.') {
+            if (has_digit == RT_TRUE) {
+                values[index++] = (value > 255U) ? 255U : (uint8_t)value;
+                value = 0U;
+                has_digit = RT_FALSE;
+            }
+        } else {
+            break;
+        }
+
+        p++;
+    }
+
+    if ((index < 3U) && (has_digit == RT_TRUE)) {
+        values[index] = (value > 255U) ? 255U : (uint8_t)value;
+    }
+
+    version->major = values[0];
+    version->minor = values[1];
+    version->patch = values[2];
+}
+
+
+static uint16_t app_uart_cmd_build_mcu_version(uint8_t *buf, uint16_t buf_size)
+{
+    app_mcu_version_frame_t frame;
+    uint16_t crc;
+
+    if ((buf == RT_NULL) || (buf_size < sizeof(frame))) {
+        return 0U;
+    }
+
+    rt_memset(&frame, 0, sizeof(frame));
+
+    frame.head = APP_UART_CMD_FRAME_HEAD;
+    frame.length = (uint8_t)sizeof(frame);
+    frame.type = APP_UART_CMD_TYPE_MCU_VERSION;
+    app_uart_cmd_parse_version(&frame.version);
+
+    crc = app_uart_cmd_crc16((const uint8_t *)&frame.version,
+                             sizeof(frame.version));
+    frame.crc_l = (uint8_t)(crc & 0xFFU);
+    frame.crc_h = (uint8_t)(crc >> 8);
+    frame.tail = APP_UART_CMD_FRAME_TAIL;
+
+    rt_memcpy(buf, &frame, sizeof(frame));
+    return (uint16_t)sizeof(frame);
+}
+
+
+
+
 
 static void app_uart_cmd_uart_tx(const uint8_t *data, uint16_t len)
 {
@@ -344,7 +510,8 @@ static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame
         return RT_FALSE;
     }
 
-    if ((frame->data[0] != APP_UART_CMD_FRAME_HEAD) || (frame->data[2] != 0x01U)) {
+    if ((frame->data[0] != APP_UART_CMD_FRAME_HEAD) ||
+        (frame->data[2] != APP_UART_CMD_TYPE_SOC_STATUS)) {
         return RT_FALSE;
     }
 
@@ -364,7 +531,10 @@ static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame
     msg->ip2_connected   = (status_bits_2 >> 1) & 0x01U;
     msg->gsm_connected   = (status_bits_2 >> 2) & 0x01U;
     msg->protect_storage = (status_bits_2 >> 3) & 0x01U;
+    msg->sdcard_status   = (status_bits_2 >> 4) & 0x01U;
+    msg->sim_status      = (status_bits_2 >> 5) & 0x01U;
     msg->reserved        = 0U;
+
 
     rt_memcpy(msg->driver_number, &frame->data[5], 9U);
 
@@ -399,6 +569,17 @@ static void app_usart_cmd_thread_entry(void *parameter)
         app_usart_cmd_poll();
     }
 }
+
+static void app_usart_cmd_version_tx_thread_entry(void *parameter)
+{
+    RT_UNUSED(parameter);
+
+    while (1) {
+        app_usart_cmd_send_mcu_version();
+        rt_thread_mdelay(APP_UART_CMD_VERSION_TX_PERIOD_MS);
+    }
+}
+
 
 int app_usart_cmd_init(void)
 {
@@ -449,7 +630,20 @@ int app_usart_cmd_task_start(void)
     rt_thread_startup(thread);
     app_uart_cmd_update_total_mileage(0U, 1U);
 
+    thread = rt_thread_create(APP_UART_CMD_VERSION_TX_THREAD_NAME,
+                              app_usart_cmd_version_tx_thread_entry,
+                              RT_NULL,
+                              APP_UART_CMD_VERSION_TX_STACK_SIZE,
+                              APP_UART_CMD_VERSION_TX_PRIORITY,
+                              APP_UART_CMD_VERSION_TX_TICK);
+    if (thread == RT_NULL) {
+        return -RT_ERROR;
+    }
+
+    rt_thread_startup(thread);
+
     return RT_EOK;
+
 }
 
 void app_usart_cmd_set_tx_callback(app_uart_cmd_tx_fn_t tx_cb)
@@ -489,6 +683,32 @@ rt_bool_t app_usart_cmd_send_ack(uint8_t type, uint8_t ret)
     return RT_TRUE;
 }
 
+
+rt_bool_t app_usart_cmd_send_mcu_version(void)
+{
+    uint8_t tx_buf[sizeof(app_mcu_version_frame_t)];
+    uint16_t tx_len;
+
+    if (g_uart_cmd_tx_cb == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    tx_len = app_uart_cmd_build_mcu_version(tx_buf, sizeof(tx_buf));
+    if (tx_len == 0U) {
+        return RT_FALSE;
+    }
+
+    rt_kprintf("[uart_cmd][tx ver] %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
+               tx_buf[0], tx_buf[1], tx_buf[2], tx_buf[3],
+               tx_buf[4], tx_buf[5], tx_buf[6], tx_buf[7], tx_buf[8]);
+
+    g_uart_cmd_tx_cb(tx_buf, tx_len);
+    return RT_TRUE;
+}
+
+
+
+
 void app_usart_cmd_poll(void)
 {
     app_uart_cmd_frame_t frame;
@@ -518,7 +738,8 @@ void app_usart_cmd_poll(void)
         app_uart_cmd_update_total_mileage(msg.driver_speed, msg.timestamp);
 
 
-        rt_kprintf("[uart_cmd][soc] cam=%u%u%u%u rec=%u loc=%u ic=%u udisk=%u ip=%u%u gsm=%u sim=%u sat=%u total=%luKB free=%luKB ts=0x%08X drv=%lu spd=%u driver=%s\n",
+        rt_kprintf("[uart_cmd][soc] cam=%u%u%u%u rec=%u loc=%u ic=%u udisk=%u ip=%u%u gsm=%u sd=%u sim_status=%u sim_signal=%u sat=%u total=%luKB free=%luKB ts=0x%08X drv=%lu spd=%u driver=%s\n",
+
                    msg.camera1_status,
                    msg.camera2_status,
                    msg.camera3_status,
@@ -530,7 +751,10 @@ void app_usart_cmd_poll(void)
                    msg.ip1_connected,
                    msg.ip2_connected,
                    msg.gsm_connected,
+                   msg.sdcard_status,
+                   msg.sim_status,
                    msg.sim_signal,
+
                    msg.used_satellite,
                    (unsigned long)msg.total_capacity,
                    (unsigned long)msg.free_capacity,

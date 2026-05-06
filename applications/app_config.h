@@ -47,7 +47,7 @@
 #define APP_CAN_TEST_TX_ID            0x123UL
 
 /*版本号*/
-#define APP_SOFTWARE_VERSION "V1.0"
+#define APP_SOFTWARE_VERSION "1.0.0"
 /* 日志开关 */
 #define APP_DEBUG_CAN_ONLY           0
 #define APP_SHUTDOWN_TRACE_ONLY      0
