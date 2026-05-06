@@ -13,6 +13,7 @@ static void svc_led_thread_entry(void *arg)
         app_led_write(APP_LED0, APP_LED_ON);
         rt_thread_mdelay(APP_LED_TOGGLE_PERIOD_MS);
         app_led_write(APP_LED0, APP_LED_OFF);
+        //app_led_write(APP_LED0, APP_LED_ON);
         rt_thread_mdelay(APP_LED_TOGGLE_PERIOD_MS);
     }
 }

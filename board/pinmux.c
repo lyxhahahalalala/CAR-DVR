@@ -112,7 +112,7 @@ void init_power_ctrl_pins(void)
 
     gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, 12, gpiom_soc_gpio0);
     gpio_set_pin_output(HPM_GPIO0, GPIO_OE_GPIOC, 12);
-    gpio_write_pin(HPM_GPIO0, GPIO_DO_GPIOC, 12, 0);
+    gpio_write_pin(HPM_GPIO0, GPIO_DO_GPIOC, 12, 1);
 
     /* MCU_SUPER_C_CHRG */
     HPM_IOC->PAD[IOC_PAD_PC13].FUNC_CTL = IOC_PC13_FUNC_CTL_GPIO_C_13;

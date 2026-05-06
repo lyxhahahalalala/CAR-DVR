@@ -46,6 +46,8 @@
 #define APP_CAN_TEST_TX_PERIOD_MS     1000
 #define APP_CAN_TEST_TX_ID            0x123UL
 
+/*版本号*/
+#define APP_SOFTWARE_VERSION "1.0.0"
 /* 日志开关 */
 #define APP_DEBUG_CAN_ONLY           0
 #define APP_SHUTDOWN_TRACE_ONLY      0
@@ -125,6 +127,9 @@
 #define APP_PWR_FINAL_HOLD_CUT_DELAY_MS            1500UL
 
 #define APP_PWR_SOC_ON_DELAY_MS                      5000UL
+
+#define APP_CAM_12V_ENABLE_DELAY_MS              5000UL
+
 
 /* 周期任务节拍 */
 #define APP_POWER_TASK_PERIOD_MS     100
