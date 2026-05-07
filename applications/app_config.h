@@ -48,6 +48,9 @@
 
 /*版本号*/
 #define APP_SOFTWARE_VERSION "1.0.0"
+
+#define APP_ADMIN_REGION_CODE 429006UL
+
 /* 日志开关 */
 #define APP_DEBUG_CAN_ONLY           0
 #define APP_SHUTDOWN_TRACE_ONLY      0

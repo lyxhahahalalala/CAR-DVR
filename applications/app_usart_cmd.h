@@ -18,7 +18,7 @@
 #define APP_UART_CMD_RX_BUF_SIZE         256U
 #define APP_UART_CMD_ACK_RET_OK          1U
 #define APP_UART_CMD_ACK_RET_ERR         0U
-#define APP_UART_CMD_TYPE_MCU_VERSION    0x11U
+
 
 
 

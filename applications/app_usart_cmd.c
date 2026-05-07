@@ -4,8 +4,8 @@
 #include "svc_storage.h"
 #include "app_config.h"
 #include "svc_lcd.h"
-
-
+#include "svc_vehicle_io.h"
+#include "svc_adc.h"
 
 
 typedef struct
@@ -27,18 +27,40 @@ typedef struct APP_PACKED_STRUCT
     uint8_t major;
     uint8_t minor;
     uint8_t patch;
-} app_mcu_version_t;
+
+    uint8_t wk_acc : 1;
+    uint8_t wk_on : 1;
+    uint8_t sw_kl1 : 1;//小灯
+    uint8_t sw_kl2 : 1;//制动
+    uint8_t sw_kl3 : 1;//左转
+    uint8_t sw_kl4 : 1;//右转
+    uint8_t sw_kl5 : 1;//远光
+    uint8_t sw_kl6 : 1;//近光
+
+    uint8_t sw_kl7 : 1;//后雾灯
+    uint8_t sw_kl8 : 1;//倒车
+    uint8_t sw_kl9 : 1;//驾驶员安全带
+    uint8_t sw_kl10 : 1;//车门
+    uint8_t key : 1;
+    uint8_t reserved : 3;
+
+    uint32_t admin_region_code;
+
+} app_mcu_status_t;
+
+
 
 typedef struct APP_PACKED_STRUCT
 {
     uint8_t head;
     uint8_t length;
     uint8_t type;
-    app_mcu_version_t version;
+    app_mcu_status_t status;
     uint8_t crc_l;
     uint8_t crc_h;
     uint8_t tail;
-} app_mcu_version_frame_t;
+} app_mcu_status_frame_t;
+
 
 
 static rt_bool_t app_uart_cmd_ring_push(app_uart_cmd_ring_t *ring, uint8_t byte)
@@ -71,6 +93,17 @@ static void app_uart_cmd_dump_frame(const uint8_t *buf, uint8_t len)
 
     rt_kprintf("[uart_cmd][frame] len=%u data:", len);
     for (i = 0; i < len; i++) {
+        rt_kprintf(" %02X", buf[i]);
+    }
+    rt_kprintf("\n");
+}
+
+static void app_uart_cmd_dump_tx_frame(const char *tag, const uint8_t *buf, uint16_t len)
+{
+    uint16_t i;
+
+    rt_kprintf("[uart_cmd][tx %s]", tag);
+    for (i = 0U; i < len; i++) {
         rt_kprintf(" %02X", buf[i]);
     }
     rt_kprintf("\n");
@@ -224,7 +257,7 @@ static uint16_t app_uart_cmd_build_ack(uint8_t type, uint8_t ret, uint8_t *buf, 
 
 
 
-static void app_uart_cmd_parse_version(app_mcu_version_t *version)
+static void app_uart_cmd_parse_version(app_mcu_status_t *status)
 {
     const char *p = APP_SOFTWARE_VERSION;
     uint8_t index = 0U;
@@ -232,13 +265,13 @@ static void app_uart_cmd_parse_version(app_mcu_version_t *version)
     rt_bool_t has_digit = RT_FALSE;
     uint8_t values[3] = {0U, 0U, 0U};
 
-    if (version == RT_NULL) {
+    if (status == RT_NULL) {
         return;
     }
 
-    version->major = 0U;
-    version->minor = 0U;
-    version->patch = 0U;
+    status->major = 0U;
+    status->minor = 0U;
+    status->patch = 0U;
 
     if (p == RT_NULL) {
         return;
@@ -269,15 +302,15 @@ static void app_uart_cmd_parse_version(app_mcu_version_t *version)
         values[index] = (value > 255U) ? 255U : (uint8_t)value;
     }
 
-    version->major = values[0];
-    version->minor = values[1];
-    version->patch = values[2];
+    status->major = values[0];
+    status->minor = values[1];
+    status->patch = values[2];
 }
-
 
 static uint16_t app_uart_cmd_build_mcu_version(uint8_t *buf, uint16_t buf_size)
 {
-    app_mcu_version_frame_t frame;
+    app_mcu_status_frame_t frame;
+    const app_vehicle_io_state_t *io_state;
     uint16_t crc;
 
     if ((buf == RT_NULL) || (buf_size < sizeof(frame))) {
@@ -289,10 +322,31 @@ static uint16_t app_uart_cmd_build_mcu_version(uint8_t *buf, uint16_t buf_size)
     frame.head = APP_UART_CMD_FRAME_HEAD;
     frame.length = (uint8_t)sizeof(frame);
     frame.type = APP_UART_CMD_TYPE_MCU_VERSION;
-    app_uart_cmd_parse_version(&frame.version);
 
-    crc = app_uart_cmd_crc16((const uint8_t *)&frame.version,
-                             sizeof(frame.version));
+    app_uart_cmd_parse_version(&frame.status);
+
+    io_state = svc_vehicle_io_get_state();
+    if (io_state != RT_NULL) {
+        frame.status.wk_acc = io_state->wk_acc ? 1U : 0U;
+        frame.status.wk_on = io_state->wk_on ? 1U : 0U;
+        frame.status.sw_kl1 = io_state->sw_kl1 ? 1U : 0U;
+        frame.status.sw_kl2 = io_state->sw_kl2 ? 1U : 0U;
+        frame.status.sw_kl3 = io_state->sw_kl3 ? 1U : 0U;
+        frame.status.sw_kl4 = io_state->sw_kl4 ? 1U : 0U;
+        frame.status.sw_kl5 = io_state->sw_kl5 ? 1U : 0U;
+        frame.status.sw_kl6 = io_state->sw_kl6 ? 1U : 0U;
+        frame.status.sw_kl7 = io_state->sw_kl7 ? 1U : 0U;
+        frame.status.sw_kl8 = io_state->sw_kl8 ? 1U : 0U;
+        frame.status.sw_kl9 = io_state->sw_kl9 ? 1U : 0U;
+        frame.status.sw_kl10 = io_state->sw_kl10 ? 1U : 0U;
+    }
+
+    frame.status.key = (svc_adc_is_any_key_pressed() == RT_TRUE) ? 1U : 0U;
+    frame.status.reserved = 0U;
+    frame.status.admin_region_code = (uint32_t)APP_ADMIN_REGION_CODE;
+
+    crc = app_uart_cmd_crc16((const uint8_t *)&frame.status,
+                             sizeof(frame.status));
     frame.crc_l = (uint8_t)(crc & 0xFFU);
     frame.crc_h = (uint8_t)(crc >> 8);
     frame.tail = APP_UART_CMD_FRAME_TAIL;
@@ -300,7 +354,6 @@ static uint16_t app_uart_cmd_build_mcu_version(uint8_t *buf, uint16_t buf_size)
     rt_memcpy(buf, &frame, sizeof(frame));
     return (uint16_t)sizeof(frame);
 }
-
 
 
 
@@ -686,7 +739,7 @@ rt_bool_t app_usart_cmd_send_ack(uint8_t type, uint8_t ret)
 
 rt_bool_t app_usart_cmd_send_mcu_version(void)
 {
-    uint8_t tx_buf[sizeof(app_mcu_version_frame_t)];
+    uint8_t tx_buf[sizeof(app_mcu_status_frame_t)];
     uint16_t tx_len;
 
     if (g_uart_cmd_tx_cb == RT_NULL) {
@@ -698,9 +751,8 @@ rt_bool_t app_usart_cmd_send_mcu_version(void)
         return RT_FALSE;
     }
 
-    rt_kprintf("[uart_cmd][tx ver] %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
-               tx_buf[0], tx_buf[1], tx_buf[2], tx_buf[3],
-               tx_buf[4], tx_buf[5], tx_buf[6], tx_buf[7], tx_buf[8]);
+    app_uart_cmd_dump_tx_frame("mcu", tx_buf, tx_len);
+
 
     g_uart_cmd_tx_cb(tx_buf, tx_len);
     return RT_TRUE;

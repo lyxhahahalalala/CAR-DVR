@@ -234,6 +234,12 @@ const app_adc_snapshot_t *svc_adc_get_snapshot(void)
     return &g_adc_snapshot;
 }
 
+rt_bool_t svc_adc_is_any_key_pressed(void)
+{
+    return (g_adc_key_last != ADC_KEY_NONE) ? RT_TRUE : RT_FALSE;
+}
+
+
 rt_bool_t svc_adc_consume_s1_event(void)
 {
     rt_bool_t event = g_adc_s1_event;

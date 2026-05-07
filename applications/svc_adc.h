@@ -10,6 +10,7 @@ rt_bool_t svc_adc_consume_s1_event(void);
 rt_bool_t svc_adc_consume_s2_event(void);
 rt_bool_t svc_adc_consume_s3_event(void);
 rt_bool_t svc_adc_consume_s4_event(void);
+rt_bool_t svc_adc_is_any_key_pressed(void);
 
 
 #endif /* APPLICATIONS_SVC_ADC_H_ */
