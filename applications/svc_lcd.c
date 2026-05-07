@@ -174,7 +174,10 @@ typedef enum
     LCD_PAGE_DEVICE_STATUS_SPEED,
     LCD_PAGE_DEVICE_STATUS_DRIVER_MONITOR,
     LCD_PAGE_SYSTEM_SETTING_KEY_VOLUME,
+    LCD_PAGE_COMMON_CONFIG_OK,
     LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS,
+    LCD_PAGE_SYSTEM_SETTING_BACKLIGHT_TIME,
+    LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL,
     LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
     LCD_PAGE_SYSTEM_SETTING_HOST_PARAM,
     LCD_PAGE_SYSTEM_SETTING_INIT_MILEAGE,
@@ -200,6 +203,7 @@ typedef struct
     const lcd_page_id_t *children;
     uint8_t child_count;
     uint8_t select_count;
+    rt_bool_t show_title;
     void (*render)(void);
     void (*on_confirm)(void);
     uint32_t auto_return_ms;
@@ -408,6 +412,42 @@ static const uint16_t *const g_system_sub_item_texts_u8g2[] = {
 
 static const uint8_t g_system_sub_item_counts_u8g2[] = {6, 6, 6, 6, 4, 4, 4, 7, 7};
 
+static const uint16_t g_vehicle_info_setting_item_1[] = {
+    0x8F66, 0x8F86, 0x0056, 0x0049, 0x004E /* 车辆VIN */
+};
+
+static const uint16_t g_vehicle_info_setting_item_2[] = {
+    0x8F66, 0x724C, 0x8BBE, 0x7F6E /* 车牌设置 */
+};
+
+static const uint16_t g_vehicle_info_setting_item_3[] = {
+    0x8F66, 0x724C, 0x989C, 0x8272 /* 车牌颜色 */
+};
+
+static const uint16_t g_vehicle_info_setting_item_4[] = {
+    0x8F66, 0x724C, 0x5206, 0x7C7B /* 车牌分类 */
+};
+
+static const uint16_t g_vehicle_info_setting_item_5[] = {
+    0x7701, 0x57DF, 0x0049, 0x0044 /* 省域ID */
+};
+
+static const uint16_t g_vehicle_info_setting_item_6[] = {
+    0x5E02, 0x57DF, 0x0049, 0x0044 /* 市域ID */
+};
+
+static const uint16_t *const g_vehicle_info_setting_item_texts_u8g2[] = {
+    g_vehicle_info_setting_item_1,
+    g_vehicle_info_setting_item_2,
+    g_vehicle_info_setting_item_3,
+    g_vehicle_info_setting_item_4,
+    g_vehicle_info_setting_item_5,
+    g_vehicle_info_setting_item_6
+};
+
+static const uint8_t g_vehicle_info_setting_item_counts_u8g2[] = {
+    5, 4, 4, 4, 4, 4
+};
 
 
 static void svc_lcd_spi_hw_init(void)
@@ -633,6 +673,7 @@ static lcd_page_id_t g_lcd_current_page_id = LCD_PAGE_HOME;
 static uint8_t g_lcd_page_selected[LCD_PAGE_MAX];
 static rt_tick_t g_lcd_page_enter_tick = 0U;
 static rt_bool_t g_lcd_need_redraw = RT_TRUE;
+static lcd_page_id_t g_lcd_common_ok_return_page = LCD_PAGE_HOME;
 static rt_tick_t g_lcd_vehicle_status_check_tick = 0U;
 static uint16_t g_lcd_vehicle_status_last_bits = 0xFFFFU;
 static uint16_t g_lcd_overtime_drive_count = 0U;
@@ -643,7 +684,7 @@ static rt_tick_t g_lcd_load_status_ok_tick = 0U;
 
 
 
-
+static const lcd_page_node_t *lcd_get_page_node(lcd_page_id_t page_id);
 static uint8_t lcd_page_get_depth(lcd_page_id_t page_id);
 static rt_bool_t lcd_get_list_page_resources(lcd_page_id_t page_id,
                                              const uint16_t *const **item_texts,
@@ -664,6 +705,14 @@ static void lcd_render_vehicle_load_status_ui(void);
 static void lcd_render_vehicle_load_status_ok_ui(void);
 static void lcd_render_location_status_ui(void);
 static void lcd_render_device_version_ui(void);
+static void lcd_render_key_volume_ui(void);
+static void lcd_render_common_config_ok_ui(void);
+static void lcd_page_confirm_key_volume(void);
+static void lcd_page_confirm_backlight_time(void);
+static void lcd_render_brightness_menu_ui(void);
+static void lcd_render_backlight_time_ui(void);
+static void lcd_render_brightness_level_ui(void);
+
 static void lcd_fb_flush(void);
 
 void lcd_fb_public_clear(void)
@@ -774,6 +823,25 @@ static uint16_t lcd_u8g2_draw_unicode_seq(u8g2_t *u8g2,
 
     return x;
 }
+
+static uint16_t lcd_u8g2_get_unicode_seq_width(u8g2_t *u8g2,
+                                               const uint16_t *codes,
+                                               uint8_t count)
+{
+    uint16_t width = 0U;
+    uint8_t i;
+
+    if ((u8g2 == RT_NULL) || (codes == RT_NULL)) {
+        return 0U;
+    }
+
+    for (i = 0U; i < count; i++) {
+        width += (uint16_t)u8g2_GetGlyphWidth(u8g2, codes[i]);
+    }
+
+    return width;
+}
+
 
 static void lcd_u8g2_draw_menu_item(u8g2_t *u8g2,
                                     uint8_t index,
@@ -888,9 +956,18 @@ static void lcd_render_menu_ui(void)
         page_start = 0U;
         row_count = 3U;
 
-        row_y[0] = 28U;
-        row_y[1] = 42U;
-        row_y[2] = 56U;
+        if ((page_node != RT_NULL) && (page_node->show_title == RT_TRUE)) {
+            row_y[0] = 28U;
+            row_y[1] = 42U;
+            row_y[2] = 56U;
+        } else {
+            row_y[0] = 16U;
+            row_y[1] = 30U;
+            row_y[2] = 44U;
+            row_count = (submenu_item_count < 4U) ? submenu_item_count : 4U;
+            row_y[3] = 58U;
+        }
+
 
         u8g2_SetFont(u8g2, LCD_FONT_CN_12);
         lcd_u8g2_draw_unicode_seq(u8g2, 2, 12, g_menu_title_u8g2, 2);
@@ -936,6 +1013,8 @@ static void lcd_render_drive_record_submenu_ui(void)
     uint8_t row_count;
     uint8_t row_y[4];
     uint8_t row;
+    const lcd_page_node_t *page_node;
+    page_node = lcd_get_page_node(g_lcd_current_page_id);
 
     u8g2 = u8g2_port_get();
     if (u8g2 == RT_NULL) {
@@ -970,9 +1049,10 @@ static void lcd_render_drive_record_submenu_ui(void)
         row_y[1] = 42U;
         row_y[2] = 56U;
 
-        /* 标题仍显示“行驶记录” */
-        u8g2_SetFont(u8g2, LCD_FONT_CN_12);
-        lcd_u8g2_draw_unicode_seq(u8g2, 2, 12, title_text, title_count);
+        if ((page_node != RT_NULL) && (page_node->show_title == RT_TRUE)) {
+            u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+            lcd_u8g2_draw_unicode_seq(u8g2, 2, 12, title_text, title_count);
+        }
 
         for (row = 0; row < row_count; row++) {
             uint8_t item_index = (uint8_t)(page_start + row);
@@ -1046,6 +1126,299 @@ static void lcd_render_submenu_ui(void)
 
     u8g2_port_flush_buffer();
 }
+
+static void lcd_render_key_volume_ui(void)
+{
+    u8g2_t *u8g2;
+    uint8_t selected_index;
+    static const uint16_t g_item_mute[] = {
+        0x6309, 0x952E, 0x9759, 0x97F3 /* 按键静音 */
+    };
+    static const uint16_t g_item_voice[] = {
+        0x6309, 0x952E, 0x53D1, 0x97F3 /* 按键发音 */
+    };
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    selected_index = g_lcd_page_selected[LCD_PAGE_SYSTEM_SETTING_KEY_VOLUME];
+
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+
+    if (selected_index == 0U) {
+        u8g2_DrawBox(u8g2, 0, 11, LCD_COLS, 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 23, g_item_mute, 4);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    if (selected_index == 1U) {
+        u8g2_DrawBox(u8g2, 0, 31, LCD_COLS, 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 43, g_item_voice, 4);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    u8g2_port_flush_buffer();
+}
+
+
+static void lcd_render_common_config_ok_ui(void)
+{
+    u8g2_t *u8g2;
+    static const uint16_t g_ok_text[] = {
+        0x914D, 0x7F6E, 0x6570, 0x636E, 0x6210, 0x529F, 0xFF01 /* 配置数据成功！ */
+    };
+    static const uint16_t g_confirm_text[] = {
+        0x786E, 0x8BA4 /* 确认 */
+    };
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+    lcd_u8g2_draw_unicode_seq(u8g2, 24, 32, g_ok_text, 7);
+
+    u8g2_DrawFrame(u8g2, 46, 46, 40, 14);
+    lcd_u8g2_draw_unicode_seq(u8g2, 54, 58, g_confirm_text, 2);
+
+    u8g2_port_flush_buffer();
+}
+
+static void lcd_render_brightness_menu_ui(void)
+{
+    u8g2_t *u8g2;
+    uint8_t selected_index;
+    static const uint16_t g_item_backlight_time[] = {
+        0x80CC, 0x5149, 0x6301, 0x7EED, 0x65F6, 0x95F4, 0x8BBE, 0x7F6E /* 背光持续时间设置 */
+    };
+    static const uint16_t g_item_brightness[] = {
+        0x5C4F, 0x5E55, 0x4EAE, 0x5EA6, 0x8BBE, 0x7F6E /* 屏幕亮度设置 */
+    };
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+
+    selected_index = g_lcd_page_selected[LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS];
+
+    if (selected_index == 0U) {
+        u8g2_DrawBox(u8g2, 0, 11, LCD_COLS, 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 23, g_item_backlight_time, 8);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    if (selected_index == 1U) {
+        u8g2_DrawBox(u8g2, 0, 31, LCD_COLS, 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 43, g_item_brightness, 6);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    u8g2_port_flush_buffer();
+}
+
+static void lcd_render_backlight_time_ui(void)
+{
+    u8g2_t *u8g2;
+    uint8_t selected_index;
+    uint16_t width;
+    uint16_t right_x;
+
+    static const uint16_t g_item_off[] = {
+        0x5173, 0x95ED /* 关闭 */
+    };
+    static const uint16_t g_item_15s[] = {
+        0x0031, 0x0035, 0x79D2 /* 15秒 */
+    };
+    static const uint16_t g_item_30s[] = {
+        0x0033, 0x0030, 0x79D2 /* 30秒 */
+    };
+    static const uint16_t g_item_1min[] = {
+        0x0031, 0x006D, 0x0069, 0x006E /* 1min */
+    };
+    static const uint16_t g_item_2min[] = {
+        0x0032, 0x006D, 0x0069, 0x006E /* 2min */
+    };
+    static const uint16_t g_item_always[] = {
+        0x5E38, 0x4EAE /* 常亮 */
+    };
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+
+    selected_index = g_lcd_page_selected[LCD_PAGE_SYSTEM_SETTING_BACKLIGHT_TIME];
+
+    /* 第1行左：关闭 */
+    if (selected_index == 0U) {
+        u8g2_DrawBox(u8g2, 0, 11, 58, 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 23, g_item_off, 2);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    /* 第1行右：15秒 */
+    width = lcd_u8g2_get_unicode_seq_width(u8g2, g_item_15s, 3);
+    right_x = (uint16_t)(LCD_COLS - 2U - width);
+    if (selected_index == 1U) {
+        u8g2_DrawBox(u8g2, 66, 11, (uint8_t)(LCD_COLS - 66), 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, right_x, 23, g_item_15s, 3);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    /* 第2行左：30秒 */
+    if (selected_index == 2U) {
+        u8g2_DrawBox(u8g2, 0, 27, 58, 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 39, g_item_30s, 3);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    /* 第2行右：1min */
+    width = lcd_u8g2_get_unicode_seq_width(u8g2, g_item_1min, 4);
+    right_x = (uint16_t)(LCD_COLS - 2U - width);
+    if (selected_index == 3U) {
+        u8g2_DrawBox(u8g2, 66, 27, (uint8_t)(LCD_COLS - 66), 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, right_x, 39, g_item_1min, 4);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    /* 第3行左：2min */
+    if (selected_index == 4U) {
+        u8g2_DrawBox(u8g2, 0, 43, 58, 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 55, g_item_2min, 4);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    /* 第3行右：常亮 */
+    width = lcd_u8g2_get_unicode_seq_width(u8g2, g_item_always, 2);
+    right_x = (uint16_t)(LCD_COLS - 2U - width);
+    if (selected_index == 5U) {
+        u8g2_DrawBox(u8g2, 66, 43, (uint8_t)(LCD_COLS - 66), 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, right_x, 55, g_item_always, 2);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    u8g2_port_flush_buffer();
+}
+
+static void lcd_render_brightness_level_ui(void)
+{
+    u8g2_t *u8g2;
+    uint8_t selected_index;
+    uint16_t width;
+    uint16_t right_x;
+
+    static const uint16_t g_item_10[] = {
+        0x0031, 0x0030, 0x0025 /* 10% */
+    };
+    static const uint16_t g_item_30[] = {
+        0x0033, 0x0030, 0x0025 /* 30% */
+    };
+    static const uint16_t g_item_50[] = {
+        0x0035, 0x0030, 0x0025 /* 50% */
+    };
+    static const uint16_t g_item_70[] = {
+        0x0037, 0x0030, 0x0025 /* 70% */
+    };
+    static const uint16_t g_item_100[] = {
+        0x0031, 0x0030, 0x0030, 0x0025 /* 100% */
+    };
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+
+    selected_index = g_lcd_page_selected[LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL];
+
+    /* 第1行左：10% */
+    if (selected_index == 0U) {
+        u8g2_DrawBox(u8g2, 0, 11, 58, 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 23, g_item_10, 3);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    /* 第1行右：30% */
+    width = lcd_u8g2_get_unicode_seq_width(u8g2, g_item_30, 3);
+    right_x = (uint16_t)(LCD_COLS - 2U - width);
+    if (selected_index == 1U) {
+        u8g2_DrawBox(u8g2, 66, 11, (uint8_t)(LCD_COLS - 66), 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, right_x, 23, g_item_30, 3);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    /* 第2行左：50% */
+    if (selected_index == 2U) {
+        u8g2_DrawBox(u8g2, 0, 27, 58, 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 39, g_item_50, 3);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    /* 第2行右：70% */
+    width = lcd_u8g2_get_unicode_seq_width(u8g2, g_item_70, 3);
+    right_x = (uint16_t)(LCD_COLS - 2U - width);
+    if (selected_index == 3U) {
+        u8g2_DrawBox(u8g2, 66, 27, (uint8_t)(LCD_COLS - 66), 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, right_x, 39, g_item_70, 3);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    /* 第3行：100% */
+    if (selected_index == 4U) {
+        u8g2_DrawBox(u8g2, 0, 43, LCD_COLS, 15);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 55, g_item_100, 4);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    u8g2_port_flush_buffer();
+}
+
 
 static void lcd_render_fatigue_drive_record_ui(void)
 {
@@ -1629,6 +2002,12 @@ static const lcd_page_id_t g_system_setting_children[] = {
     LCD_PAGE_SYSTEM_SETTING_COMPONENT_VER
 };
 
+static const lcd_page_id_t g_brightness_setting_children[] = {
+    LCD_PAGE_SYSTEM_SETTING_BACKLIGHT_TIME,
+    LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL
+};
+
+
 static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
     [LCD_PAGE_HOME] = {
         LCD_PAGE_HOME, LCD_PAGE_MAX, LCD_PAGE_KIND_VIEW,
@@ -1648,7 +2027,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
     },
     [LCD_PAGE_SYSTEM_SETTING_MENU] = {
         LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_MAIN_MENU, LCD_PAGE_KIND_LIST,
-        g_system_setting_children, 9U, 9U, lcd_render_drive_record_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX
+        g_system_setting_children, 9U, 9U, RT_TRUE, lcd_render_drive_record_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX
     },
     [LCD_PAGE_DRIVE_RECORD_FATIGUE] = {
         LCD_PAGE_DRIVE_RECORD_FATIGUE, LCD_PAGE_DRIVE_RECORD_MENU, LCD_PAGE_KIND_VIEW,
@@ -1807,15 +2186,97 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
     [LCD_PAGE_DEVICE_STATUS_AV] = { LCD_PAGE_DEVICE_STATUS_AV, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
     [LCD_PAGE_DEVICE_STATUS_SPEED] = { LCD_PAGE_DEVICE_STATUS_SPEED, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
     [LCD_PAGE_DEVICE_STATUS_DRIVER_MONITOR] = { LCD_PAGE_DEVICE_STATUS_DRIVER_MONITOR, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_SYSTEM_SETTING_KEY_VOLUME] = { LCD_PAGE_SYSTEM_SETTING_KEY_VOLUME, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS] = { LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO] = { LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_SYSTEM_SETTING_HOST_PARAM] = { LCD_PAGE_SYSTEM_SETTING_HOST_PARAM, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_SYSTEM_SETTING_INIT_MILEAGE] = { LCD_PAGE_SYSTEM_SETTING_INIT_MILEAGE, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_SYSTEM_SETTING_REGISTER] = { LCD_PAGE_SYSTEM_SETTING_REGISTER, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_SYSTEM_SETTING_UNREGISTER] = { LCD_PAGE_SYSTEM_SETTING_UNREGISTER, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_SYSTEM_SETTING_REC_VER] = { LCD_PAGE_SYSTEM_SETTING_REC_VER, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_SYSTEM_SETTING_COMPONENT_VER] = { LCD_PAGE_SYSTEM_SETTING_COMPONENT_VER, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX }
+    [LCD_PAGE_SYSTEM_SETTING_KEY_VOLUME] = {
+        LCD_PAGE_SYSTEM_SETTING_KEY_VOLUME,
+        LCD_PAGE_SYSTEM_SETTING_MENU,
+        LCD_PAGE_KIND_LIST,
+        RT_NULL,
+        0U,
+        2U,
+        lcd_render_key_volume_ui,
+        lcd_page_confirm_key_volume,
+        0U,
+        LCD_PAGE_MAX
+    },
+    [LCD_PAGE_COMMON_CONFIG_OK] = {
+        LCD_PAGE_COMMON_CONFIG_OK,
+        LCD_PAGE_MAX,
+        LCD_PAGE_KIND_ACTION_RESULT,
+        RT_NULL,
+        0U,
+        0U,
+        lcd_render_common_config_ok_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
+
+
+    [LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS] = {
+        LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS,
+        LCD_PAGE_SYSTEM_SETTING_MENU,
+        LCD_PAGE_KIND_LIST,
+        g_brightness_setting_children,
+        2U,
+        2U,
+        lcd_render_brightness_menu_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
+    [LCD_PAGE_SYSTEM_SETTING_BACKLIGHT_TIME] = {
+        LCD_PAGE_SYSTEM_SETTING_BACKLIGHT_TIME,
+        LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS,
+        LCD_PAGE_KIND_LIST,
+        RT_NULL,
+        0U,
+        6U,
+        RT_FALSE,
+        lcd_render_backlight_time_ui,
+        lcd_page_confirm_backlight_time,
+        0U,
+        LCD_PAGE_MAX
+    },
+
+
+    [LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL] = {
+        LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL,
+        LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS,
+        LCD_PAGE_KIND_LIST,
+        RT_NULL,
+        0U,
+        5U,
+        RT_FALSE,
+        lcd_render_brightness_level_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
+
+
+    [LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO] = {
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
+        LCD_PAGE_SYSTEM_SETTING_MENU,
+        LCD_PAGE_KIND_LIST,
+        RT_NULL,
+        0U,
+        6U,
+        RT_FALSE,
+        lcd_render_drive_record_submenu_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
+
+
+
+    [LCD_PAGE_SYSTEM_SETTING_HOST_PARAM] = { LCD_PAGE_SYSTEM_SETTING_HOST_PARAM, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_SYSTEM_SETTING_INIT_MILEAGE] = { LCD_PAGE_SYSTEM_SETTING_INIT_MILEAGE, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_SYSTEM_SETTING_REGISTER] = { LCD_PAGE_SYSTEM_SETTING_REGISTER, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_SYSTEM_SETTING_UNREGISTER] = { LCD_PAGE_SYSTEM_SETTING_UNREGISTER, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_SYSTEM_SETTING_REC_VER] = { LCD_PAGE_SYSTEM_SETTING_REC_VER, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_SYSTEM_SETTING_COMPONENT_VER] = { LCD_PAGE_SYSTEM_SETTING_COMPONENT_VER, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX }
+
 };
 
 static const lcd_page_node_t *lcd_get_page_node(lcd_page_id_t page_id)
@@ -1866,19 +2327,57 @@ static void lcd_page_enter(lcd_page_id_t page_id)
     g_lcd_need_redraw = RT_TRUE;
 }
 
+static void lcd_page_enter_common_ok(lcd_page_id_t return_page)
+{
+    if (return_page >= LCD_PAGE_MAX) {
+        return_page = LCD_PAGE_HOME;
+    }
+
+    g_lcd_common_ok_return_page = return_page;
+    lcd_page_enter(LCD_PAGE_COMMON_CONFIG_OK);
+}
+
+
 static void lcd_page_confirm_load_status(void)
 {
     lcd_page_enter(LCD_PAGE_DRIVE_RECORD_LOAD_STATUS_OK);
 }
 
+static void lcd_page_confirm_key_volume(void)
+{
+    /*
+     * 这里后续如果你要真正保存“静音/发音”配置，
+     * 就根据 g_lcd_page_selected[LCD_PAGE_SYSTEM_SETTING_KEY_VOLUME]
+     * 去写配置变量或 EEPROM。
+     */
+    lcd_page_enter_common_ok(LCD_PAGE_SYSTEM_SETTING_KEY_VOLUME);
+}
+
+static void lcd_page_confirm_backlight_time(void)
+{
+    /*
+     * 这里后续根据
+     * g_lcd_page_selected[LCD_PAGE_SYSTEM_SETTING_BACKLIGHT_TIME]
+     * 去写背光持续时间配置和 EEPROM。
+     */
+    lcd_page_enter_common_ok(LCD_PAGE_SYSTEM_SETTING_BACKLIGHT_TIME);
+}
+
+
 static void lcd_page_handle_back(void)
 {
     const lcd_page_node_t *page = lcd_get_page_node(g_lcd_current_page_id);
+
+    if (g_lcd_current_page_id == LCD_PAGE_COMMON_CONFIG_OK) {
+        lcd_page_enter(g_lcd_common_ok_return_page);
+        return;
+    }
 
     if (g_lcd_current_page_id == LCD_PAGE_HOME) {
         lcd_page_enter(LCD_PAGE_MAIN_MENU);
         return;
     }
+
 
     if ((page != RT_NULL) && (page->parent_id < LCD_PAGE_MAX)) {
         lcd_page_enter(page->parent_id);
@@ -1915,11 +2414,14 @@ static void lcd_page_handle_confirm(void)
     }
 
     if (page->kind == LCD_PAGE_KIND_ACTION_RESULT) {
-        if (page->auto_return_target < LCD_PAGE_MAX) {
+        if (g_lcd_current_page_id == LCD_PAGE_COMMON_CONFIG_OK) {
+            lcd_page_enter(g_lcd_common_ok_return_page);
+        } else if (page->auto_return_target < LCD_PAGE_MAX) {
             lcd_page_enter(page->auto_return_target);
         }
         return;
     }
+
 
     if (page->on_confirm != RT_NULL) {
         page->on_confirm();
@@ -2051,6 +2553,14 @@ static rt_bool_t lcd_get_list_page_resources(lcd_page_id_t page_id,
         *item_count = 9U;
         *title_text = g_menu_item_text_3;
         *title_count = 4U;
+        return RT_TRUE;
+
+    case LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO:
+        *item_texts = g_vehicle_info_setting_item_texts_u8g2;
+        *item_counts = g_vehicle_info_setting_item_counts_u8g2;
+        *item_count = 6U;
+        *title_text = g_system_sub_item_3;   /* 车辆信息设置 */
+        *title_count = 6U;
         return RT_TRUE;
 
     case LCD_PAGE_DRIVE_RECORD_INFO_CENTER:

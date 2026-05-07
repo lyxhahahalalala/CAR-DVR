@@ -559,7 +559,7 @@ static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame
     uint8_t status_bits_1;
     uint8_t status_bits_2;
 
-    if ((frame == RT_NULL) || (msg == RT_NULL) || (frame->length < 85U)) {
+    if ((frame == RT_NULL) || (msg == RT_NULL) || (frame->length < 89U)) {
         return RT_FALSE;
     }
 
@@ -600,13 +600,15 @@ static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame
     rt_memcpy(msg->phone_number, &frame->data[27], 10U);
 
     msg->used_satellite = frame->data[37];
-    msg->timestamp      = app_uart_cmd_read_le32(&frame->data[38]);
-    msg->driver_speed   = app_uart_cmd_read_le16(&frame->data[42]);
+    msg->raw_gps_coord  = app_uart_cmd_read_le32(&frame->data[38]);
+    msg->timestamp      = app_uart_cmd_read_le32(&frame->data[42]);
+    msg->driver_speed   = app_uart_cmd_read_le16(&frame->data[46]);
 
-    rt_memcpy(msg->terminal_id, &frame->data[44], 30U);
+    rt_memcpy(msg->terminal_id, &frame->data[48], 30U);
 
-    msg->ip1 = app_uart_cmd_read_le32(&frame->data[74]);
-    msg->ip2 = app_uart_cmd_read_le32(&frame->data[78]);
+    msg->ip1 = app_uart_cmd_read_le32(&frame->data[78]);
+    msg->ip2 = app_uart_cmd_read_le32(&frame->data[82]);
+
 
     return RT_TRUE;
 }
@@ -790,7 +792,8 @@ void app_usart_cmd_poll(void)
         app_uart_cmd_update_total_mileage(msg.driver_speed, msg.timestamp);
 
 
-        rt_kprintf("[uart_cmd][soc] cam=%u%u%u%u rec=%u loc=%u ic=%u udisk=%u ip=%u%u gsm=%u sd=%u sim_status=%u sim_signal=%u sat=%u total=%luKB free=%luKB ts=0x%08X drv=%lu spd=%u driver=%s\n",
+        rt_kprintf("[uart_cmd][soc] cam=%u%u%u%u rec=%u loc=%u ic=%u udisk=%u ip=%u%u gsm=%u sd=%u sim_status=%u sim_signal=%u sat=%u gps=0x%08lX total=%luKB free=%luKB ts=0x%08X drv=%lu spd=%u driver=%s\n",
+
 
                    msg.camera1_status,
                    msg.camera2_status,
@@ -808,6 +811,7 @@ void app_usart_cmd_poll(void)
                    msg.sim_signal,
 
                    msg.used_satellite,
+                   (unsigned long)msg.raw_gps_coord,
                    (unsigned long)msg.total_capacity,
                    (unsigned long)msg.free_capacity,
                    msg.timestamp,

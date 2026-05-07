@@ -69,12 +69,14 @@ typedef struct
     uint8_t sim_signal; // SIM卡信号
     uint8_t phone_number[10];// 手机号，BCD码
     uint8_t used_satellite;// 使用的卫星数
+    uint32_t raw_gps_coord;// 经纬度
     uint32_t timestamp;// UTC时间戳(秒)
     uint16_t driver_speed;// 速度，0.1km/h
     uint8_t terminal_id[30];// 终端ID
     uint32_t ip1;// 第1服务器地址
     uint32_t ip2;// 第2服务器地址
 } app_soc_status_msg_t;
+
 
 
 
