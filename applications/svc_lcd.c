@@ -712,6 +712,7 @@ static void lcd_page_confirm_backlight_time(void);
 static void lcd_render_brightness_menu_ui(void);
 static void lcd_render_backlight_time_ui(void);
 static void lcd_render_brightness_level_ui(void);
+static void lcd_page_confirm_brightness_level(void);
 
 static void lcd_fb_flush(void);
 
@@ -724,6 +725,7 @@ void lcd_fb_public_set_pixel(uint8_t x, uint8_t y, rt_bool_t on)
 {
     lcd_fb_set_pixel(x, y, on);
 }
+
 
 void lcd_fb_public_flush(void)
 {
@@ -956,18 +958,9 @@ static void lcd_render_menu_ui(void)
         page_start = 0U;
         row_count = 3U;
 
-        if ((page_node != RT_NULL) && (page_node->show_title == RT_TRUE)) {
-            row_y[0] = 28U;
-            row_y[1] = 42U;
-            row_y[2] = 56U;
-        } else {
-            row_y[0] = 16U;
-            row_y[1] = 30U;
-            row_y[2] = 44U;
-            row_count = (submenu_item_count < 4U) ? submenu_item_count : 4U;
-            row_y[3] = 58U;
-        }
-
+        row_y[0] = 28U;
+        row_y[1] = 42U;
+        row_y[2] = 56U;
 
         u8g2_SetFont(u8g2, LCD_FONT_CN_12);
         lcd_u8g2_draw_unicode_seq(u8g2, 2, 12, g_menu_title_u8g2, 2);
@@ -1000,6 +993,7 @@ static void lcd_render_menu_ui(void)
     u8g2_port_flush_buffer();
 }
 
+
 static void lcd_render_drive_record_submenu_ui(void)
 {
     u8g2_t *u8g2;
@@ -1013,8 +1007,13 @@ static void lcd_render_drive_record_submenu_ui(void)
     uint8_t row_count;
     uint8_t row_y[4];
     uint8_t row;
+    rt_bool_t show_title = RT_TRUE;
     const lcd_page_node_t *page_node;
+
     page_node = lcd_get_page_node(g_lcd_current_page_id);
+    if (page_node != RT_NULL) {
+        show_title = page_node->show_title;
+    }
 
     u8g2 = u8g2_port_get();
     if (u8g2 == RT_NULL) {
@@ -1037,70 +1036,105 @@ static void lcd_render_drive_record_submenu_ui(void)
     }
 
     selected_index = g_lcd_page_selected[g_lcd_current_page_id];
-    (void)submenu_texts;
-    (void)submenu_counts;
-    (void)submenu_item_count;
 
-    if (selected_index < 3U) {
-        page_start = 0U;
-        row_count = (submenu_item_count < 3U) ? submenu_item_count : 3U;
+    if (show_title == RT_TRUE) {
+        if (selected_index < 3U) {
+            page_start = 0U;
+            row_count = (submenu_item_count < 3U) ? submenu_item_count : 3U;
 
-        row_y[0] = 28U;
-        row_y[1] = 42U;
-        row_y[2] = 56U;
+            row_y[0] = 28U;
+            row_y[1] = 42U;
+            row_y[2] = 56U;
 
-        if ((page_node != RT_NULL) && (page_node->show_title == RT_TRUE)) {
             u8g2_SetFont(u8g2, LCD_FONT_CN_12);
             lcd_u8g2_draw_unicode_seq(u8g2, 2, 12, title_text, title_count);
-        }
 
-        for (row = 0; row < row_count; row++) {
-            uint8_t item_index = (uint8_t)(page_start + row);
-            lcd_u8g2_draw_submenu_item(u8g2,
-                                       item_index,
-                                       row_y[row],
-                                       (item_index == selected_index) ? RT_TRUE : RT_FALSE);
-        }
-    } else if ((selected_index < 7U) && (submenu_item_count > 3U)) {
-        page_start = 3U;
-        row_count = (uint8_t)(submenu_item_count - 3U);
-        if (row_count > 4U) {
-            row_count = 4U;
-        }
+            for (row = 0; row < row_count; row++) {
+                uint8_t item_index = (uint8_t)(page_start + row);
+                lcd_u8g2_draw_submenu_item(u8g2,
+                                           item_index,
+                                           row_y[row],
+                                           (item_index == selected_index) ? RT_TRUE : RT_FALSE);
+            }
+        } else if ((selected_index < 7U) && (submenu_item_count > 3U)) {
+            page_start = 3U;
+            row_count = (uint8_t)(submenu_item_count - 3U);
+            if (row_count > 4U) {
+                row_count = 4U;
+            }
 
-        row_y[0] = 14U;
-        row_y[1] = 28U;
-        row_y[2] = 42U;
-        row_y[3] = 56U;
+            row_y[0] = 14U;
+            row_y[1] = 28U;
+            row_y[2] = 42U;
+            row_y[3] = 56U;
 
-        for (row = 0; row < row_count; row++) {
-            uint8_t item_index = (uint8_t)(page_start + row);
-            lcd_u8g2_draw_submenu_item(u8g2,
-                                       item_index,
-                                       row_y[row],
-                                       (item_index == selected_index) ? RT_TRUE : RT_FALSE);
+            for (row = 0; row < row_count; row++) {
+                uint8_t item_index = (uint8_t)(page_start + row);
+                lcd_u8g2_draw_submenu_item(u8g2,
+                                           item_index,
+                                           row_y[row],
+                                           (item_index == selected_index) ? RT_TRUE : RT_FALSE);
+            }
+        } else if (submenu_item_count > 7U) {
+            page_start = 7U;
+            row_count = (uint8_t)(submenu_item_count - 7U);
+            if (row_count > 2U) {
+                row_count = 2U;
+            }
+
+            row_y[0] = 28U;
+            row_y[1] = 42U;
+
+            for (row = 0; row < row_count; row++) {
+                uint8_t item_index = (uint8_t)(page_start + row);
+                lcd_u8g2_draw_submenu_item(u8g2,
+                                           item_index,
+                                           row_y[row],
+                                           (item_index == selected_index) ? RT_TRUE : RT_FALSE);
+            }
         }
-    } else if (submenu_item_count > 7U) {
-        page_start = 7U;
-        row_count = (uint8_t)(submenu_item_count - 7U);
-        if (row_count > 2U) {
-            row_count = 2U;
-        }
+    } else {
+        if (selected_index < 4U) {
+            page_start = 0U;
+            row_count = (submenu_item_count < 4U) ? submenu_item_count : 4U;
 
-        row_y[0] = 28U;
-        row_y[1] = 42U;
+            row_y[0] = 16U;
+            row_y[1] = 30U;
+            row_y[2] = 44U;
+            row_y[3] = 58U;
 
-        for (row = 0; row < row_count; row++) {
-            uint8_t item_index = (uint8_t)(page_start + row);
-            lcd_u8g2_draw_submenu_item(u8g2,
-                                       item_index,
-                                       row_y[row],
-                                       (item_index == selected_index) ? RT_TRUE : RT_FALSE);
+            for (row = 0; row < row_count; row++) {
+                uint8_t item_index = (uint8_t)(page_start + row);
+                lcd_u8g2_draw_submenu_item(u8g2,
+                                           item_index,
+                                           row_y[row],
+                                           (item_index == selected_index) ? RT_TRUE : RT_FALSE);
+            }
+        } else {
+            page_start = 4U;
+            row_count = (uint8_t)(submenu_item_count - 4U);
+            if (row_count > 4U) {
+                row_count = 4U;
+            }
+
+            row_y[0] = 16U;
+            row_y[1] = 30U;
+            row_y[2] = 44U;
+            row_y[3] = 58U;
+
+            for (row = 0; row < row_count; row++) {
+                uint8_t item_index = (uint8_t)(page_start + row);
+                lcd_u8g2_draw_submenu_item(u8g2,
+                                           item_index,
+                                           row_y[row],
+                                           (item_index == selected_index) ? RT_TRUE : RT_FALSE);
+            }
         }
     }
 
     u8g2_port_flush_buffer();
 }
+
 
 static void lcd_render_submenu_ui(void)
 {
@@ -2011,19 +2045,19 @@ static const lcd_page_id_t g_brightness_setting_children[] = {
 static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
     [LCD_PAGE_HOME] = {
         LCD_PAGE_HOME, LCD_PAGE_MAX, LCD_PAGE_KIND_VIEW,
-        RT_NULL, 0U, 0U, lcd_render_home_ui, RT_NULL, 0U, LCD_PAGE_MAX
+        RT_NULL, 0U, 0U, RT_FALSE, lcd_render_home_ui, RT_NULL, 0U, LCD_PAGE_MAX
     },
     [LCD_PAGE_MAIN_MENU] = {
         LCD_PAGE_MAIN_MENU, LCD_PAGE_HOME, LCD_PAGE_KIND_LIST,
-        g_main_menu_children, 3U, 3U, lcd_render_menu_ui, RT_NULL, 0U, LCD_PAGE_MAX
+        g_main_menu_children, 3U, 3U, RT_TRUE, lcd_render_menu_ui, RT_NULL, 0U, LCD_PAGE_MAX
     },
     [LCD_PAGE_DRIVE_RECORD_MENU] = {
         LCD_PAGE_DRIVE_RECORD_MENU, LCD_PAGE_MAIN_MENU, LCD_PAGE_KIND_LIST,
-        g_drive_record_children, 9U, 9U, lcd_render_drive_record_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX
+        g_drive_record_children, 9U, 9U, RT_TRUE, lcd_render_drive_record_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX
     },
     [LCD_PAGE_DEVICE_STATUS_MENU] = {
         LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_MAIN_MENU, LCD_PAGE_KIND_LIST,
-        g_device_status_children, 9U, 9U, lcd_render_drive_record_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX
+        g_device_status_children, 9U, 9U, RT_TRUE, lcd_render_drive_record_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX
     },
     [LCD_PAGE_SYSTEM_SETTING_MENU] = {
         LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_MAIN_MENU, LCD_PAGE_KIND_LIST,
@@ -2031,35 +2065,35 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
     },
     [LCD_PAGE_DRIVE_RECORD_FATIGUE] = {
         LCD_PAGE_DRIVE_RECORD_FATIGUE, LCD_PAGE_DRIVE_RECORD_MENU, LCD_PAGE_KIND_VIEW,
-        RT_NULL, 0U, 0U, lcd_render_fatigue_drive_record_ui, RT_NULL, 0U, LCD_PAGE_MAX
+        RT_NULL, 0U, 0U, RT_FALSE, lcd_render_fatigue_drive_record_ui, RT_NULL, 0U, LCD_PAGE_MAX
     },
     [LCD_PAGE_DRIVE_RECORD_LOCATION] = {
         LCD_PAGE_DRIVE_RECORD_LOCATION, LCD_PAGE_DRIVE_RECORD_MENU, LCD_PAGE_KIND_VIEW,
-        RT_NULL, 0U, 0U, lcd_render_location_status_ui, RT_NULL, 0U, LCD_PAGE_MAX
+        RT_NULL, 0U, 0U, RT_FALSE, lcd_render_location_status_ui, RT_NULL, 0U, LCD_PAGE_MAX
     },
     [LCD_PAGE_DRIVE_RECORD_MILEAGE] = {
         LCD_PAGE_DRIVE_RECORD_MILEAGE, LCD_PAGE_DRIVE_RECORD_MENU, LCD_PAGE_KIND_VIEW,
-        RT_NULL, 0U, 0U, lcd_render_drive_mileage_ui, RT_NULL, 0U, LCD_PAGE_MAX
+        RT_NULL, 0U, 0U, RT_FALSE, lcd_render_drive_mileage_ui, RT_NULL, 0U, LCD_PAGE_MAX
     },
     [LCD_PAGE_DRIVE_RECORD_DRIVER_INFO] = {
         LCD_PAGE_DRIVE_RECORD_DRIVER_INFO, LCD_PAGE_DRIVE_RECORD_MENU, LCD_PAGE_KIND_VIEW,
-        RT_NULL, 0U, 0U, lcd_render_driver_info_ui, RT_NULL, 0U, LCD_PAGE_MAX
+        RT_NULL, 0U, 0U, RT_FALSE, lcd_render_driver_info_ui, RT_NULL, 0U, LCD_PAGE_MAX
     },
     [LCD_PAGE_DRIVE_RECORD_VEHICLE_INFO] = {
         LCD_PAGE_DRIVE_RECORD_VEHICLE_INFO, LCD_PAGE_DRIVE_RECORD_MENU, LCD_PAGE_KIND_VIEW,
-        RT_NULL, 0U, 0U, lcd_render_vehicle_info_ui, RT_NULL, 0U, LCD_PAGE_MAX
+        RT_NULL, 0U, 0U, RT_FALSE, lcd_render_vehicle_info_ui, RT_NULL, 0U, LCD_PAGE_MAX
     },
     [LCD_PAGE_DRIVE_RECORD_LOAD_STATUS] = {
         LCD_PAGE_DRIVE_RECORD_LOAD_STATUS, LCD_PAGE_DRIVE_RECORD_MENU, LCD_PAGE_KIND_LIST,
-        RT_NULL, 0U, 3U, lcd_render_vehicle_load_status_ui, lcd_page_confirm_load_status, 0U, LCD_PAGE_MAX
+        RT_NULL, 0U, 3U, RT_FALSE, lcd_render_vehicle_load_status_ui, lcd_page_confirm_load_status, 0U, LCD_PAGE_MAX
     },
     [LCD_PAGE_DRIVE_RECORD_LOAD_STATUS_OK] = {
         LCD_PAGE_DRIVE_RECORD_LOAD_STATUS_OK, LCD_PAGE_DRIVE_RECORD_LOAD_STATUS, LCD_PAGE_KIND_ACTION_RESULT,
-        RT_NULL, 0U, 0U, lcd_render_vehicle_load_status_ok_ui, RT_NULL, 3000U, LCD_PAGE_DRIVE_RECORD_LOAD_STATUS
+        RT_NULL, 0U, 0U, RT_FALSE, lcd_render_vehicle_load_status_ok_ui, RT_NULL, 3000U, LCD_PAGE_DRIVE_RECORD_LOAD_STATUS
     },
     [LCD_PAGE_DRIVE_RECORD_EXPORT] = {
         LCD_PAGE_DRIVE_RECORD_EXPORT, LCD_PAGE_DRIVE_RECORD_MENU, LCD_PAGE_KIND_VIEW,
-        RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX
+        RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX
     },
     [LCD_PAGE_DRIVE_RECORD_INFO_CENTER] = {
         LCD_PAGE_DRIVE_RECORD_INFO_CENTER,
@@ -2068,6 +2102,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         g_info_center_children,
         4U,
         4U,
+        RT_TRUE,
         lcd_render_drive_record_submenu_ui,
         RT_NULL,
         0U,
@@ -2080,6 +2115,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         RT_NULL,
         0U,
         0U,
+        RT_FALSE,
         lcd_render_submenu_ui,
         RT_NULL,
         0U,
@@ -2093,6 +2129,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         RT_NULL,
         0U,
         0U,
+        RT_FALSE,
         lcd_render_submenu_ui,
         RT_NULL,
         0U,
@@ -2106,6 +2143,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         RT_NULL,
         0U,
         0U,
+        RT_FALSE,
         lcd_render_submenu_ui,
         RT_NULL,
         0U,
@@ -2119,6 +2157,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         g_info_center_text_children,
         4U,
         4U,
+        RT_TRUE,
         lcd_render_drive_record_submenu_ui,
         RT_NULL,
         0U,
@@ -2131,6 +2170,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         RT_NULL,
         0U,
         0U,
+        RT_FALSE,
         lcd_render_info_center_dispatch_ui,
         RT_NULL,
         0U,
@@ -2143,6 +2183,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         RT_NULL,
         0U,
         0U,
+        RT_FALSE,
         lcd_render_submenu_ui,
         RT_NULL,
         0U,
@@ -2155,6 +2196,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         RT_NULL,
         0U,
         0U,
+        RT_FALSE,
         lcd_render_submenu_ui,
         RT_NULL,
         0U,
@@ -2167,6 +2209,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         RT_NULL,
         0U,
         0U,
+        RT_FALSE,
         lcd_render_submenu_ui,
         RT_NULL,
         0U,
@@ -2175,17 +2218,17 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
 
     [LCD_PAGE_DRIVE_RECORD_VIN] = {
         LCD_PAGE_DRIVE_RECORD_VIN, LCD_PAGE_DRIVE_RECORD_MENU, LCD_PAGE_KIND_VIEW,
-        RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX
+        RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX
     },
-    [LCD_PAGE_DEVICE_STATUS_VERSION] = { LCD_PAGE_DEVICE_STATUS_VERSION, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_device_version_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_DEVICE_STATUS_GFRS] = { LCD_PAGE_DEVICE_STATUS_GFRS, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_DEVICE_STATUS_SELF_TEST] = { LCD_PAGE_DEVICE_STATUS_SELF_TEST, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_DEVICE_STATUS_LOCATION_MODULE] = { LCD_PAGE_DEVICE_STATUS_LOCATION_MODULE, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_DEVICE_STATUS_VEHICLE] = { LCD_PAGE_DEVICE_STATUS_VEHICLE, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_LIST, RT_NULL, 0U, 3U, lcd_render_vehicle_status_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_DEVICE_STATUS_STORAGE] = { LCD_PAGE_DEVICE_STATUS_STORAGE, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_DEVICE_STATUS_AV] = { LCD_PAGE_DEVICE_STATUS_AV, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_DEVICE_STATUS_SPEED] = { LCD_PAGE_DEVICE_STATUS_SPEED, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
-    [LCD_PAGE_DEVICE_STATUS_DRIVER_MONITOR] = { LCD_PAGE_DEVICE_STATUS_DRIVER_MONITOR, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_DEVICE_STATUS_VERSION] = { LCD_PAGE_DEVICE_STATUS_VERSION, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_device_version_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_DEVICE_STATUS_GFRS] = { LCD_PAGE_DEVICE_STATUS_GFRS, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_DEVICE_STATUS_SELF_TEST] = { LCD_PAGE_DEVICE_STATUS_SELF_TEST, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_DEVICE_STATUS_LOCATION_MODULE] = { LCD_PAGE_DEVICE_STATUS_LOCATION_MODULE, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_DEVICE_STATUS_VEHICLE] = { LCD_PAGE_DEVICE_STATUS_VEHICLE, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_LIST, RT_NULL, 0U, 3U, RT_FALSE, lcd_render_vehicle_status_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_DEVICE_STATUS_STORAGE] = { LCD_PAGE_DEVICE_STATUS_STORAGE, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_DEVICE_STATUS_AV] = { LCD_PAGE_DEVICE_STATUS_AV, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_DEVICE_STATUS_SPEED] = { LCD_PAGE_DEVICE_STATUS_SPEED, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+    [LCD_PAGE_DEVICE_STATUS_DRIVER_MONITOR] = { LCD_PAGE_DEVICE_STATUS_DRIVER_MONITOR, LCD_PAGE_DEVICE_STATUS_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
     [LCD_PAGE_SYSTEM_SETTING_KEY_VOLUME] = {
         LCD_PAGE_SYSTEM_SETTING_KEY_VOLUME,
         LCD_PAGE_SYSTEM_SETTING_MENU,
@@ -2193,6 +2236,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         RT_NULL,
         0U,
         2U,
+        RT_FALSE,
         lcd_render_key_volume_ui,
         lcd_page_confirm_key_volume,
         0U,
@@ -2205,6 +2249,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         RT_NULL,
         0U,
         0U,
+        RT_FALSE,
         lcd_render_common_config_ok_ui,
         RT_NULL,
         0U,
@@ -2219,6 +2264,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         g_brightness_setting_children,
         2U,
         2U,
+        RT_FALSE,
         lcd_render_brightness_menu_ui,
         RT_NULL,
         0U,
@@ -2248,7 +2294,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         5U,
         RT_FALSE,
         lcd_render_brightness_level_ui,
-        RT_NULL,
+        lcd_page_confirm_brightness_level,
         0U,
         LCD_PAGE_MAX
     },
@@ -2361,6 +2407,16 @@ static void lcd_page_confirm_backlight_time(void)
      * 去写背光持续时间配置和 EEPROM。
      */
     lcd_page_enter_common_ok(LCD_PAGE_SYSTEM_SETTING_BACKLIGHT_TIME);
+}
+
+static void lcd_page_confirm_brightness_level(void)
+{
+    /*
+     * 后续根据
+     * g_lcd_page_selected[LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL]
+     * 去写亮度配置和 EEPROM。
+     */
+    lcd_page_enter_common_ok(LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL);
 }
 
 
@@ -3248,6 +3304,7 @@ int svc_lcd_task_start(void)
                               APP_LCD_TASK_STACK_SIZE,
                               APP_LCD_TASK_PRIORITY,
                               APP_LCD_TASK_TICK);
+
     if (thread == RT_NULL)
     {
         APP_NON_CAN_LOG("lcd thread create failed\r\n");

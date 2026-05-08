@@ -33,7 +33,7 @@
 #define APP_UART_CMD_VERSION_TX_TICK             10
 #define APP_UART_CMD_VERSION_TX_PERIOD_MS        1000U
 
-#define APP_UART_CMD_TYPE_SOC_STATUS     0x00U
+#define APP_UART_CMD_TYPE_SOC_STATUS     0x01U
 #define APP_UART_CMD_TYPE_MCU_VERSION    0x11U
 
 
@@ -45,37 +45,41 @@ typedef struct
 
 typedef struct
 {
-    uint8_t camera1_status  : 1;// 摄像头1状态
-    uint8_t camera2_status  : 1;// 摄像头2状态
-    uint8_t camera3_status  : 1;// 摄像头3状态
-    uint8_t camera4_status  : 1;// 摄像头4状态
-    uint8_t record_status   : 1;// 录音状态
-    uint8_t location_status : 1;// 定位状态
-    uint8_t ic_card_status  : 1;// IC卡状态
-    uint8_t udisk_status    : 1;// U盘状态
+    uint8_t camera1_status   : 1;// 摄像头1状态
+    uint8_t camera2_status   : 1;// 摄像头2状态
+    uint8_t camera3_status   : 1;// 摄像头3状态
+    uint8_t camera4_status   : 1;// 摄像头4状态
+    uint8_t record_status    : 1;// 录音状态
+    uint8_t location_status  : 1;// 定位状态
+    uint8_t ic_card_status   : 1;// IC卡状态
+    uint8_t udisk_status     : 1;// U盘状态
 
-    uint8_t ip1_connected   : 1;// IP1连接状态
-    uint8_t ip2_connected   : 1;// IP2连接状态
-    uint8_t gsm_connected   : 1;// GSM连接状态
-    uint8_t protect_storage : 1;// 防护存储器状态
-    uint8_t sdcard_status   : 1;
-    uint8_t sim_status      : 1;
-    uint8_t reserved        : 2;
+    uint8_t ip1_connected       : 1;// IP1连接状态
+    uint8_t ip2_connected       : 1;// IP2连接状态
+    uint8_t gsm_connected       : 1;// GSM连接状态
+    uint8_t protect_storage     : 1;// 防护存储器状态
+    uint8_t sdcard_status       : 1;// SD卡状态
+    uint8_t sim_status          : 1;// SIM卡状态
+    uint8_t latitude_direction  : 1;// 0: 北纬; 1: 南纬
+    uint8_t longitude_direction : 1;// 0: 东经; 1: 西经
 
     uint8_t driver_number[9];// 驾驶员证号，BCD码
     uint32_t total_capacity;// 安全存储器总容量(KB)
-    uint32_t free_capacity;
+    uint32_t free_capacity;// 安全存储器剩余容量(KB)
     uint32_t driver_time;// 驾驶时间(秒)
-    uint8_t sim_signal; // SIM卡信号
+    uint8_t sim_signal;// SIM卡信号
     uint8_t phone_number[10];// 手机号，BCD码
     uint8_t used_satellite;// 使用的卫星数
-    uint32_t raw_gps_coord;// 经纬度
+    uint32_t latitude;// 纬度
+    uint32_t longitude;// 经度
     uint32_t timestamp;// UTC时间戳(秒)
     uint16_t driver_speed;// 速度，0.1km/h
     uint8_t terminal_id[30];// 终端ID
     uint32_t ip1;// 第1服务器地址
     uint32_t ip2;// 第2服务器地址
 } app_soc_status_msg_t;
+
+
 
 
 

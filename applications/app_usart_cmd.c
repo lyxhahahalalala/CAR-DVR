@@ -41,7 +41,8 @@ typedef struct APP_PACKED_STRUCT
     uint8_t sw_kl8 : 1;//倒车
     uint8_t sw_kl9 : 1;//驾驶员安全带
     uint8_t sw_kl10 : 1;//车门
-    uint8_t key : 1;
+    uint8_t key : 1;//按键声音是否触发
+    //uint8_t sound_level :2;//音量大小
     uint8_t reserved : 3;
 
     uint32_t admin_region_code;
@@ -559,7 +560,7 @@ static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame
     uint8_t status_bits_1;
     uint8_t status_bits_2;
 
-    if ((frame == RT_NULL) || (msg == RT_NULL) || (frame->length < 89U)) {
+    if ((frame == RT_NULL) || (msg == RT_NULL) || (frame->length < 93U)) {
         return RT_FALSE;
     }
 
@@ -580,13 +581,15 @@ static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame
     msg->ic_card_status  = (status_bits_1 >> 6) & 0x01U;
     msg->udisk_status    = (status_bits_1 >> 7) & 0x01U;
 
-    msg->ip1_connected   = (status_bits_2 >> 0) & 0x01U;
-    msg->ip2_connected   = (status_bits_2 >> 1) & 0x01U;
-    msg->gsm_connected   = (status_bits_2 >> 2) & 0x01U;
-    msg->protect_storage = (status_bits_2 >> 3) & 0x01U;
-    msg->sdcard_status   = (status_bits_2 >> 4) & 0x01U;
-    msg->sim_status      = (status_bits_2 >> 5) & 0x01U;
-    msg->reserved        = 0U;
+    msg->ip1_connected       = (status_bits_2 >> 0) & 0x01U;
+    msg->ip2_connected       = (status_bits_2 >> 1) & 0x01U;
+    msg->gsm_connected       = (status_bits_2 >> 2) & 0x01U;
+    msg->protect_storage     = (status_bits_2 >> 3) & 0x01U;
+    msg->sdcard_status       = (status_bits_2 >> 4) & 0x01U;
+    msg->sim_status          = (status_bits_2 >> 5) & 0x01U;
+    msg->latitude_direction  = (status_bits_2 >> 6) & 0x01U;
+    msg->longitude_direction = (status_bits_2 >> 7) & 0x01U;
+
 
 
     rt_memcpy(msg->driver_number, &frame->data[5], 9U);
@@ -600,14 +603,17 @@ static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame
     rt_memcpy(msg->phone_number, &frame->data[27], 10U);
 
     msg->used_satellite = frame->data[37];
-    msg->raw_gps_coord  = app_uart_cmd_read_le32(&frame->data[38]);
-    msg->timestamp      = app_uart_cmd_read_le32(&frame->data[42]);
-    msg->driver_speed   = app_uart_cmd_read_le16(&frame->data[46]);
+    msg->latitude       = app_uart_cmd_read_le32(&frame->data[38]);
+    msg->longitude      = app_uart_cmd_read_le32(&frame->data[42]);
+    msg->timestamp      = app_uart_cmd_read_le32(&frame->data[46]);
+    msg->driver_speed   = app_uart_cmd_read_le16(&frame->data[50]);
 
-    rt_memcpy(msg->terminal_id, &frame->data[48], 30U);
+    rt_memcpy(msg->terminal_id, &frame->data[52], 30U);
 
-    msg->ip1 = app_uart_cmd_read_le32(&frame->data[78]);
-    msg->ip2 = app_uart_cmd_read_le32(&frame->data[82]);
+    msg->ip1 = app_uart_cmd_read_le32(&frame->data[82]);
+    msg->ip2 = app_uart_cmd_read_le32(&frame->data[86]);
+
+
 
 
     return RT_TRUE;
@@ -792,7 +798,8 @@ void app_usart_cmd_poll(void)
         app_uart_cmd_update_total_mileage(msg.driver_speed, msg.timestamp);
 
 
-        rt_kprintf("[uart_cmd][soc] cam=%u%u%u%u rec=%u loc=%u ic=%u udisk=%u ip=%u%u gsm=%u sd=%u sim_status=%u sim_signal=%u sat=%u gps=0x%08lX total=%luKB free=%luKB ts=0x%08X drv=%lu spd=%u driver=%s\n",
+        rt_kprintf("[uart_cmd][soc] cam=%u%u%u%u rec=%u loc=%u ic=%u udisk=%u ip=%u%u gsm=%u sd=%u sim_status=%u sim_signal=%u lat_dir=%u lon_dir=%u lat=0x%08lX lon=0x%08lX total=%luKB free=%luKB ts=0x%08X drv=%lu spd=%u driver=%s\n",
+
 
 
                    msg.camera1_status,
@@ -810,8 +817,11 @@ void app_usart_cmd_poll(void)
                    msg.sim_status,
                    msg.sim_signal,
 
-                   msg.used_satellite,
-                   (unsigned long)msg.raw_gps_coord,
+                   msg.latitude_direction,
+                   msg.longitude_direction,
+                   (unsigned long)msg.latitude,
+                   (unsigned long)msg.longitude,
+
                    (unsigned long)msg.total_capacity,
                    (unsigned long)msg.free_capacity,
                    msg.timestamp,
