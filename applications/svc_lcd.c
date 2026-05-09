@@ -10,6 +10,7 @@
 #include "svc_adc.h"
 #include "u8g2_port.h"
 #include "svc_vehicle_io.h"
+#include "svc_storage.h"
 /*
  * LCD 相关控制脚，按当前已打通的连线整理如下：
  * PA03 -> LCD_RSTB      硬件复位，低有效
@@ -180,6 +181,12 @@ typedef enum
     LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL,
     LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
     LCD_PAGE_SYSTEM_SETTING_HOST_PARAM,
+    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE,
+    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SOS_PHONE,
+    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SERVER1,
+    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SERVER2,
+
+
     LCD_PAGE_SYSTEM_SETTING_INIT_MILEAGE,
     LCD_PAGE_SYSTEM_SETTING_REGISTER,
     LCD_PAGE_SYSTEM_SETTING_UNREGISTER,
@@ -710,6 +717,16 @@ static uint16_t g_lcd_total_mileage_rem_m = 0U;
 static uint8_t g_lcd_load_status_index = 0U;   /* 0=空载 1=半载 2=满载 */
 static rt_tick_t g_lcd_load_status_ok_tick = 0U;
 
+#define LCD_LOCAL_PHONE_FOCUS_NUMBER   0U
+#define LCD_LOCAL_PHONE_FOCUS_DIGIT    1U
+#define LCD_LOCAL_PHONE_FOCUS_ACTION   2U
+
+static char g_lcd_local_phone_digits[12] = "00000000000";
+static uint8_t g_lcd_local_phone_cursor = 0U;
+static uint8_t g_lcd_local_phone_selected_digit = 0U;
+static uint8_t g_lcd_local_phone_focus = LCD_LOCAL_PHONE_FOCUS_NUMBER;
+static uint8_t g_lcd_local_phone_func_index = 1U; /* 0=退出 1=保存 */
+
 
 
 static const lcd_page_node_t *lcd_get_page_node(lcd_page_id_t page_id);
@@ -741,7 +758,9 @@ static void lcd_render_brightness_menu_ui(void);
 static void lcd_render_backlight_time_ui(void);
 static void lcd_render_brightness_level_ui(void);
 static void lcd_page_confirm_brightness_level(void);
-
+static void lcd_render_local_phone_ui(void);
+static void lcd_prepare_local_phone_page(void);
+static rt_bool_t lcd_handle_local_phone_keys(void);
 static void lcd_fb_flush(void);
 
 void lcd_fb_public_clear(void)
@@ -2069,6 +2088,13 @@ static const lcd_page_id_t g_brightness_setting_children[] = {
     LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL
 };
 
+static const lcd_page_id_t g_host_param_children[] = {
+    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE,
+    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SOS_PHONE,
+    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SERVER1,
+    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SERVER2
+};
+
 
 static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
     [LCD_PAGE_HOME] = {
@@ -2345,8 +2371,8 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         LCD_PAGE_SYSTEM_SETTING_HOST_PARAM,
         LCD_PAGE_SYSTEM_SETTING_MENU,
         LCD_PAGE_KIND_LIST,
-        RT_NULL,
-        0U,
+        g_host_param_children,
+        4U,
         4U,
         RT_FALSE,
         lcd_render_drive_record_submenu_ui,
@@ -2354,6 +2380,59 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         0U,
         LCD_PAGE_MAX
     },
+    [LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE] = {
+        LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE,
+        LCD_PAGE_SYSTEM_SETTING_HOST_PARAM,
+        LCD_PAGE_KIND_VIEW,
+        RT_NULL,
+        0U,
+        0U,
+        RT_FALSE,
+        lcd_render_local_phone_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
+    [LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SOS_PHONE] = {
+        LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SOS_PHONE,
+        LCD_PAGE_SYSTEM_SETTING_HOST_PARAM,
+        LCD_PAGE_KIND_VIEW,
+        RT_NULL,
+        0U,
+        0U,
+        RT_FALSE,
+        lcd_render_submenu_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
+    [LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SERVER1] = {
+        LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SERVER1,
+        LCD_PAGE_SYSTEM_SETTING_HOST_PARAM,
+        LCD_PAGE_KIND_VIEW,
+        RT_NULL,
+        0U,
+        0U,
+        RT_FALSE,
+        lcd_render_submenu_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
+    [LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SERVER2] = {
+        LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SERVER2,
+        LCD_PAGE_SYSTEM_SETTING_HOST_PARAM,
+        LCD_PAGE_KIND_VIEW,
+        RT_NULL,
+        0U,
+        0U,
+        RT_FALSE,
+        lcd_render_submenu_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
+
 
 
 
@@ -2409,6 +2488,9 @@ static void lcd_page_enter(lcd_page_id_t page_id)
     }
 
     g_lcd_current_page_id = page_id;
+    if (page_id == LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE) {
+            lcd_prepare_local_phone_page();
+        }
     g_lcd_menu_mode = (page_id != LCD_PAGE_HOME) ? RT_TRUE : RT_FALSE;
     g_lcd_page_enter_tick = rt_tick_get();
     g_lcd_need_redraw = RT_TRUE;
@@ -2423,6 +2505,23 @@ static void lcd_page_enter_common_ok(lcd_page_id_t return_page)
     g_lcd_common_ok_return_page = return_page;
     lcd_page_enter(LCD_PAGE_COMMON_CONFIG_OK);
 }
+
+static void lcd_prepare_local_phone_page(void)
+{
+    svc_storage_phone_t phone;
+
+    if (svc_storage_load_local_phone(&phone) == RT_TRUE) {
+        rt_memcpy(g_lcd_local_phone_digits, phone.digits, sizeof(g_lcd_local_phone_digits));
+    } else {
+        rt_memcpy(g_lcd_local_phone_digits, "00000000000", sizeof(g_lcd_local_phone_digits));
+    }
+
+    g_lcd_local_phone_cursor = 0U;
+    g_lcd_local_phone_focus = LCD_LOCAL_PHONE_FOCUS_NUMBER;
+    g_lcd_local_phone_func_index = 1U;
+    g_lcd_local_phone_selected_digit = (uint8_t)(g_lcd_local_phone_digits[0] - '0');
+}
+
 
 
 static void lcd_page_confirm_load_status(void)
@@ -3175,6 +3274,21 @@ static void svc_lcd_thread_entry(void *arg)
 
     while (1)
     {
+
+        if (lcd_handle_local_phone_keys() == RT_TRUE) {
+            lcd_page_handle_auto_return();
+            lcd_page_handle_dynamic_refresh();
+
+            if (g_lcd_need_redraw == RT_TRUE) {
+                lcd_render_current_page();
+                g_lcd_need_redraw = RT_FALSE;
+            }
+
+            rt_thread_mdelay(10);
+            continue;
+        }
+
+
         if (svc_adc_consume_s1_event() == RT_TRUE) {
             lcd_page_handle_back();
         }
@@ -3364,6 +3478,213 @@ int svc_lcd_task_start(void)
     rt_thread_startup(thread);
     return RT_EOK;
 }
+
+static void lcd_render_local_phone_ui(void)
+{
+    u8g2_t *u8g2;
+    uint8_t i;
+    uint8_t cursor_x;
+    char phone_str[12];
+
+    static const uint16_t g_title_text[] = {
+        0x672C, 0x673A, 0x53F7, 0x7801, 0xFF1A /* 本机号码： */
+    };
+    static const uint16_t g_exit_text[] = {
+        0x9000, 0x51FA /* 退出 */
+    };
+    static const uint16_t g_save_text[] = {
+        0x4FDD, 0x5B58 /* 保存 */
+    };
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    rt_memcpy(phone_str, g_lcd_local_phone_digits, sizeof(phone_str));
+
+    u8g2_port_clear_buffer();
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    /* 第一行：本机号码：+ 11位号码 */
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 12, g_title_text, 5);
+
+    u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+    u8g2_DrawStr(u8g2, 62, 12, phone_str);
+
+    /* 第一行始终显示当前编辑位 */
+    cursor_x = (uint8_t)(62U + g_lcd_local_phone_cursor * 6U);
+
+    if (g_lcd_local_phone_focus == LCD_LOCAL_PHONE_FOCUS_NUMBER) {
+        u8g2_DrawBox(u8g2, cursor_x - 1U, 2U, 8U, 12U);
+        u8g2_SetDrawColor(u8g2, 0);
+
+        {
+            char s[2];
+            s[0] = g_lcd_local_phone_digits[g_lcd_local_phone_cursor];
+            s[1] = '\0';
+            u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+            u8g2_DrawStr(u8g2, cursor_x, 12, s);
+        }
+
+        u8g2_SetDrawColor(u8g2, 1);
+    } else {
+        u8g2_DrawFrame(u8g2, cursor_x - 1U, 2U, 8U, 12U);
+    }
+
+
+    /* 第二行：0123456789 */
+    u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+    for (i = 0U; i < 10U; i++) {
+        uint8_t x = (uint8_t)(4U + i * 12U);
+
+        if ((g_lcd_local_phone_focus == LCD_LOCAL_PHONE_FOCUS_DIGIT) &&
+            (i == g_lcd_local_phone_selected_digit)) {
+            u8g2_DrawBox(u8g2, x - 1U, 20U, 10U, 12U);
+            u8g2_SetDrawColor(u8g2, 0);
+        }
+
+        {
+            char s[2];
+            s[0] = (char)('0' + i);
+            s[1] = '\0';
+            u8g2_DrawStr(u8g2, x, 30, s);
+        }
+
+        u8g2_SetDrawColor(u8g2, 1);
+    }
+
+    /* 第三行：退出 / 保存 */
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+
+    if ((g_lcd_local_phone_focus == LCD_LOCAL_PHONE_FOCUS_ACTION) &&
+        (g_lcd_local_phone_func_index == 0U)) {
+        u8g2_DrawBox(u8g2, 10, 40, 34, 14);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 16, 52, g_exit_text, 2);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    if ((g_lcd_local_phone_focus == LCD_LOCAL_PHONE_FOCUS_ACTION) &&
+        (g_lcd_local_phone_func_index == 1U)) {
+        u8g2_DrawBox(u8g2, 78, 40, 34, 14);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 84, 52, g_save_text, 2);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    u8g2_port_flush_buffer();
+}
+
+static rt_bool_t lcd_handle_local_phone_keys(void)
+{
+    svc_storage_phone_t phone;
+
+    if (g_lcd_current_page_id != LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE) {
+        return RT_FALSE;
+    }
+
+    if (svc_adc_consume_s2_event() == RT_TRUE) {
+        if (g_lcd_local_phone_focus == LCD_LOCAL_PHONE_FOCUS_NUMBER) {
+            if (g_lcd_local_phone_cursor > 0U) {
+                g_lcd_local_phone_cursor--;
+            }
+
+            g_lcd_local_phone_selected_digit =
+                (uint8_t)(g_lcd_local_phone_digits[g_lcd_local_phone_cursor] - '0');
+        } else if (g_lcd_local_phone_focus == LCD_LOCAL_PHONE_FOCUS_DIGIT) {
+            if (g_lcd_local_phone_selected_digit > 0U) {
+                g_lcd_local_phone_selected_digit--;
+            } else {
+                g_lcd_local_phone_selected_digit = 9U;
+            }
+        } else {
+            if (g_lcd_local_phone_func_index > 0U) {
+                g_lcd_local_phone_func_index--;
+            } else {
+                g_lcd_local_phone_func_index = 1U;
+            }
+        }
+
+        g_lcd_need_redraw = RT_TRUE;
+    }
+
+    if (svc_adc_consume_s3_event() == RT_TRUE) {
+        if (g_lcd_local_phone_focus == LCD_LOCAL_PHONE_FOCUS_NUMBER) {
+            if (g_lcd_local_phone_cursor < 10U) {
+                g_lcd_local_phone_cursor++;
+            }
+
+            g_lcd_local_phone_selected_digit =
+                (uint8_t)(g_lcd_local_phone_digits[g_lcd_local_phone_cursor] - '0');
+        } else if (g_lcd_local_phone_focus == LCD_LOCAL_PHONE_FOCUS_DIGIT) {
+            if (g_lcd_local_phone_selected_digit < 9U) {
+                g_lcd_local_phone_selected_digit++;
+            } else {
+                g_lcd_local_phone_selected_digit = 0U;
+            }
+        } else {
+            if (g_lcd_local_phone_func_index < 1U) {
+                g_lcd_local_phone_func_index++;
+            } else {
+                g_lcd_local_phone_func_index = 0U;
+            }
+        }
+
+        g_lcd_need_redraw = RT_TRUE;
+    }
+
+    if (svc_adc_consume_s1_event() == RT_TRUE) {
+        if (g_lcd_local_phone_focus == LCD_LOCAL_PHONE_FOCUS_NUMBER) {
+            g_lcd_local_phone_focus = LCD_LOCAL_PHONE_FOCUS_DIGIT;
+            g_lcd_local_phone_selected_digit =
+                (uint8_t)(g_lcd_local_phone_digits[g_lcd_local_phone_cursor] - '0');
+        } else if (g_lcd_local_phone_focus == LCD_LOCAL_PHONE_FOCUS_DIGIT) {
+            g_lcd_local_phone_focus = LCD_LOCAL_PHONE_FOCUS_ACTION;
+        } else {
+            g_lcd_local_phone_focus = LCD_LOCAL_PHONE_FOCUS_NUMBER;
+        }
+
+        g_lcd_need_redraw = RT_TRUE;
+    }
+
+    if (svc_adc_consume_s4_event() == RT_TRUE) {
+        if (g_lcd_local_phone_focus == LCD_LOCAL_PHONE_FOCUS_NUMBER) {
+            g_lcd_local_phone_selected_digit =
+                (uint8_t)(g_lcd_local_phone_digits[g_lcd_local_phone_cursor] - '0');
+            g_lcd_need_redraw = RT_TRUE;
+        } else if (g_lcd_local_phone_focus == LCD_LOCAL_PHONE_FOCUS_DIGIT) {
+            g_lcd_local_phone_digits[g_lcd_local_phone_cursor] =
+                (char)('0' + g_lcd_local_phone_selected_digit);
+
+            if (g_lcd_local_phone_cursor < 10U) {
+                g_lcd_local_phone_cursor++;
+            }
+
+            g_lcd_local_phone_selected_digit =
+                (uint8_t)(g_lcd_local_phone_digits[g_lcd_local_phone_cursor] - '0');
+
+            g_lcd_need_redraw = RT_TRUE;
+        } else {
+            if (g_lcd_local_phone_func_index == 0U) {
+                lcd_page_enter(LCD_PAGE_SYSTEM_SETTING_HOST_PARAM);
+            } else {
+                rt_memcpy(phone.digits, g_lcd_local_phone_digits, sizeof(phone.digits));
+                if (svc_storage_save_local_phone(&phone) == RT_TRUE) {
+                    lcd_page_enter_common_ok(LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE);
+                }
+            }
+
+            g_lcd_need_redraw = RT_TRUE;
+        }
+    }
+
+    return RT_TRUE;
+}
+
+
 
 
 

@@ -14,6 +14,10 @@
 #define SVC_STORAGE_MAGIC            0x4D494C45UL /* MILE */
 #define SVC_STORAGE_VERSION          1U
 
+#define SVC_STORAGE_LOCAL_PHONE_ADDR     0x0040U
+#define SVC_STORAGE_PHONE_MAGIC          0x50484F4EUL /* PHON */
+#define SVC_STORAGE_PHONE_VERSION        1U
+
 typedef struct
 {
     uint32_t magic;
@@ -25,6 +29,15 @@ typedef struct
     uint32_t checksum;
 } svc_storage_mileage_record_t;
 
+typedef struct
+{
+    uint32_t magic;
+    uint16_t version;
+    uint16_t length;
+    char digits[12];
+    uint32_t checksum;
+} svc_storage_phone_record_t;
+
 static struct rt_i2c_bus_device *g_eeprom_i2c_bus = RT_NULL;
 
 static svc_storage_mileage_t g_storage_mileage_shadow = {
@@ -32,6 +45,8 @@ static svc_storage_mileage_t g_storage_mileage_shadow = {
     .odo_rem_m = 0U,
     .reserved = 0U
 };
+
+static const char g_default_local_phone[12] = "00000000000";
 
 static uint32_t svc_storage_checksum(const uint8_t *data, uint16_t len)
 {
@@ -157,6 +172,48 @@ static rt_bool_t svc_storage_record_is_valid(const svc_storage_mileage_record_t 
 
     return (checksum == record->checksum) ? RT_TRUE : RT_FALSE;
 }
+
+static rt_bool_t svc_storage_phone_digits_valid(const char *digits)
+{
+    uint8_t i;
+
+    if (digits == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    for (i = 0U; i < 11U; i++) {
+        if ((digits[i] < '0') || (digits[i] > '9')) {
+            return RT_FALSE;
+        }
+    }
+
+    return (digits[11] == '\0') ? RT_TRUE : RT_FALSE;
+}
+
+static rt_bool_t svc_storage_phone_record_is_valid(const svc_storage_phone_record_t *record)
+{
+    uint32_t checksum;
+
+    if (record == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if ((record->magic != SVC_STORAGE_PHONE_MAGIC) ||
+        (record->version != SVC_STORAGE_PHONE_VERSION) ||
+        (record->length != sizeof(svc_storage_phone_record_t))) {
+        return RT_FALSE;
+    }
+
+    if (svc_storage_phone_digits_valid(record->digits) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    checksum = svc_storage_checksum((const uint8_t *)record,
+                                    (uint16_t)(sizeof(svc_storage_phone_record_t) - sizeof(uint32_t)));
+
+    return (checksum == record->checksum) ? RT_TRUE : RT_FALSE;
+}
+
 
 static void svc_storage_thread_entry(void *arg)
 {
@@ -287,3 +344,73 @@ rt_bool_t svc_storage_save_mileage(const svc_storage_mileage_t *mileage)
 
     return RT_TRUE;
 }
+
+rt_bool_t svc_storage_load_local_phone(svc_storage_phone_t *phone)
+{
+    svc_storage_phone_record_t record;
+
+    if (phone == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if ((g_eeprom_i2c_bus == RT_NULL) ||
+        (svc_eeprom_read(SVC_STORAGE_LOCAL_PHONE_ADDR,
+                         (uint8_t *)&record,
+                         sizeof(record)) != RT_TRUE) ||
+        (svc_storage_phone_record_is_valid(&record) != RT_TRUE)) {
+        rt_memcpy(phone->digits, g_default_local_phone, sizeof(phone->digits));
+        APP_NON_CAN_LOG("EEPROM: no valid local phone, use default %s\r\n", phone->digits);
+        return RT_FALSE;
+    }
+
+    rt_memcpy(phone->digits, record.digits, sizeof(phone->digits));
+    APP_NON_CAN_LOG("EEPROM: load local phone %s\r\n", phone->digits);
+    return RT_TRUE;
+}
+
+rt_bool_t svc_storage_save_local_phone(const svc_storage_phone_t *phone)
+{
+    svc_storage_phone_record_t record;
+    svc_storage_phone_record_t verify;
+
+    if ((phone == RT_NULL) ||
+        (svc_storage_phone_digits_valid(phone->digits) != RT_TRUE)) {
+        return RT_FALSE;
+    }
+
+    if (g_eeprom_i2c_bus == RT_NULL) {
+        APP_NON_CAN_LOG("EEPROM: save local phone failed, bus null\r\n");
+        return RT_FALSE;
+    }
+
+    rt_memset(&record, 0, sizeof(record));
+    record.magic = SVC_STORAGE_PHONE_MAGIC;
+    record.version = SVC_STORAGE_PHONE_VERSION;
+    record.length = sizeof(record);
+    rt_memcpy(record.digits, phone->digits, sizeof(record.digits));
+    record.checksum = svc_storage_checksum((const uint8_t *)&record,
+                                           (uint16_t)(sizeof(record) - sizeof(uint32_t)));
+
+    if (svc_eeprom_write(SVC_STORAGE_LOCAL_PHONE_ADDR,
+                         (const uint8_t *)&record,
+                         sizeof(record)) != RT_TRUE) {
+        APP_NON_CAN_LOG("EEPROM: save local phone write failed\r\n");
+        return RT_FALSE;
+    }
+
+    if (svc_eeprom_read(SVC_STORAGE_LOCAL_PHONE_ADDR,
+                        (uint8_t *)&verify,
+                        sizeof(verify)) != RT_TRUE) {
+        APP_NON_CAN_LOG("EEPROM: save local phone verify read failed\r\n");
+        return RT_FALSE;
+    }
+
+    if (svc_storage_phone_record_is_valid(&verify) != RT_TRUE) {
+        APP_NON_CAN_LOG("EEPROM: save local phone verify invalid\r\n");
+        return RT_FALSE;
+    }
+
+    APP_NON_CAN_LOG("EEPROM: save local phone %s\r\n", phone->digits);
+    return RT_TRUE;
+}
+

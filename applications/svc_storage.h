@@ -11,10 +11,18 @@ typedef struct
     uint16_t reserved;
 } svc_storage_mileage_t;
 
+typedef struct
+{
+    char digits[12]; /* 11位数字 + '\0' */
+} svc_storage_phone_t;
+
 int svc_storage_init(void);
 int svc_storage_task_start(void);
 
 rt_bool_t svc_storage_load_mileage(svc_storage_mileage_t *mileage);
 rt_bool_t svc_storage_save_mileage(const svc_storage_mileage_t *mileage);
+
+rt_bool_t svc_storage_load_local_phone(svc_storage_phone_t *phone);
+rt_bool_t svc_storage_save_local_phone(const svc_storage_phone_t *phone);
 
 #endif /* APPLICATIONS_SVC_STORAGE_H_ */
