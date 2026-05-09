@@ -99,14 +99,19 @@ static rt_uint8_t svc_vehicle_io_apply_level(rt_uint32_t raw_level, rt_uint8_t a
 static void svc_vehicle_io_update_state(void)
 {
     const app_adc_snapshot_t *adc_snapshot;
+    rt_uint32_t wk_acc_raw;
+    rt_uint32_t wk_on_raw;
+
 
     /* WK_ACC / WK_ON 当前板级需求为低有效。 */
-    g_vehicle_io_state.wk_acc = (gpio_read_pin(WK_ACC_GPIO_CTRL,
-                                               WK_ACC_GPIO_INDEX,
-                                               WK_ACC_PIN) == 0U) ? 1U : 0U;
-    g_vehicle_io_state.wk_on = (gpio_read_pin(WK_ON_GPIO_CTRL,
-                                              WK_ON_GPIO_INDEX,
-                                              WK_ON_PIN) == 0U) ? 1U : 0U;
+    wk_acc_raw = gpio_read_pin(WK_ACC_GPIO_CTRL, WK_ACC_GPIO_INDEX, WK_ACC_PIN);
+    wk_on_raw  = gpio_read_pin(WK_ON_GPIO_CTRL,  WK_ON_GPIO_INDEX,  WK_ON_PIN);
+
+    g_vehicle_io_state.wk_acc = (wk_acc_raw == 0U) ? 1U : 0U;
+    g_vehicle_io_state.wk_on  = (wk_on_raw  == 0U) ? 1U : 0U;
+
+
+
 
     /* SW_KL1 ~ SW_KL10 */
     g_vehicle_io_state.sw_kl1 = svc_vehicle_io_apply_level(

@@ -330,6 +330,9 @@ static uint16_t app_uart_cmd_build_mcu_version(uint8_t *buf, uint16_t buf_size)
     if (io_state != RT_NULL) {
         frame.status.wk_acc = io_state->wk_acc ? 1U : 0U;
         frame.status.wk_on = io_state->wk_on ? 1U : 0U;
+
+
+
         frame.status.sw_kl1 = io_state->sw_kl1 ? 1U : 0U;
         frame.status.sw_kl2 = io_state->sw_kl2 ? 1U : 0U;
         frame.status.sw_kl3 = io_state->sw_kl3 ? 1U : 0U;

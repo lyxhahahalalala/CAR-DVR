@@ -436,6 +436,34 @@ static const uint16_t g_vehicle_info_setting_item_6[] = {
     0x5E02, 0x57DF, 0x0049, 0x0044 /* 市域ID */
 };
 
+static const uint16_t g_host_param_item_1[] = {
+    0x672C, 0x673A, 0x53F7, 0x7801, 0x8BBE, 0x7F6E /* 本机号码设置 */
+};
+
+static const uint16_t g_host_param_item_2[] = {
+    0x0053, 0x004F, 0x0053, 0x53F7, 0x7801, 0x8BBE, 0x7F6E /* SOS号码设置 */
+};
+
+static const uint16_t g_host_param_item_3[] = {
+    0x7B2C, 0x4E00, 0x670D, 0x52A1, 0x5668 /* 第一服务器 */
+};
+
+static const uint16_t g_host_param_item_4[] = {
+    0x7B2C, 0x4E8C, 0x670D, 0x52A1, 0x5668 /* 第二服务器 */
+};
+
+static const uint16_t *const g_host_param_item_texts_u8g2[] = {
+    g_host_param_item_1,
+    g_host_param_item_2,
+    g_host_param_item_3,
+    g_host_param_item_4
+};
+
+static const uint8_t g_host_param_item_counts_u8g2[] = {
+    6, 7, 5, 5
+};
+
+
 static const uint16_t *const g_vehicle_info_setting_item_texts_u8g2[] = {
     g_vehicle_info_setting_item_1,
     g_vehicle_info_setting_item_2,
@@ -1793,9 +1821,9 @@ static void lcd_render_vehicle_status_ui(void)
 
     if (page == 0U) {
         lcd_vehicle_draw_ascii_left(u8g2, 14, "ACC",
-                                    (state->wk_acc == 0U) ? RT_TRUE : RT_FALSE);
+                                    (state->wk_acc != 0U) ? RT_TRUE : RT_FALSE);
         lcd_vehicle_draw_ascii_right(u8g2, 14, "ON",
-                                     (state->wk_on == 0U) ? RT_TRUE : RT_FALSE);
+                                     (state->wk_on != 0U) ? RT_TRUE : RT_FALSE);
 
         lcd_vehicle_draw_cn_left(u8g2, 34, g_brake_text, 2U,
                                  (state->sw_kl2 != 0U) ? RT_TRUE : RT_FALSE);
@@ -2313,10 +2341,23 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         0U,
         LCD_PAGE_MAX
     },
+    [LCD_PAGE_SYSTEM_SETTING_HOST_PARAM] = {
+        LCD_PAGE_SYSTEM_SETTING_HOST_PARAM,
+        LCD_PAGE_SYSTEM_SETTING_MENU,
+        LCD_PAGE_KIND_LIST,
+        RT_NULL,
+        0U,
+        4U,
+        RT_FALSE,
+        lcd_render_drive_record_submenu_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
 
 
 
-    [LCD_PAGE_SYSTEM_SETTING_HOST_PARAM] = { LCD_PAGE_SYSTEM_SETTING_HOST_PARAM, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
+
     [LCD_PAGE_SYSTEM_SETTING_INIT_MILEAGE] = { LCD_PAGE_SYSTEM_SETTING_INIT_MILEAGE, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
     [LCD_PAGE_SYSTEM_SETTING_REGISTER] = { LCD_PAGE_SYSTEM_SETTING_REGISTER, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
     [LCD_PAGE_SYSTEM_SETTING_UNREGISTER] = { LCD_PAGE_SYSTEM_SETTING_UNREGISTER, LCD_PAGE_SYSTEM_SETTING_MENU, LCD_PAGE_KIND_VIEW, RT_NULL, 0U, 0U, RT_FALSE, lcd_render_submenu_ui, RT_NULL, 0U, LCD_PAGE_MAX },
@@ -2634,6 +2675,15 @@ static rt_bool_t lcd_get_list_page_resources(lcd_page_id_t page_id,
         *title_text = g_info_center_item_1; /* 文本信息 */
         *title_count = 4U;
         return RT_TRUE;
+
+    case LCD_PAGE_SYSTEM_SETTING_HOST_PARAM:
+        *item_texts = g_host_param_item_texts_u8g2;
+        *item_counts = g_host_param_item_counts_u8g2;
+        *item_count = 4U;
+        *title_text = g_system_sub_item_4;   /* 主机参数设置 */
+        *title_count = 6U;
+        return RT_TRUE;
+
 
     default:
         break;
