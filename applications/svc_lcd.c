@@ -120,9 +120,15 @@ typedef struct
     uint8_t drive_hour;
     uint8_t drive_minute;
     uint8_t drive_second;
-    uint8_t top_status_value;//卫星数据是否有效
+    uint8_t top_status_value;
+    uint32_t latitude;
+    uint32_t longitude;
+    uint32_t timestamp;
+    uint8_t latitude_direction;
+    uint8_t longitude_direction;
     char card_id[20];
 } lcd_home_ui_data_t;
+
 
 static lcd_home_ui_data_t g_lcd_home_ui = {
     .speed_kmh_x10 = 0U,
@@ -133,8 +139,16 @@ static lcd_home_ui_data_t g_lcd_home_ui = {
     .drive_minute = 0U,
     .drive_second = 0U,
     .top_status_value = 0U,
+    .latitude = 0U,
+    .longitude = 0U,
+    .timestamp = 0U,
+    .latitude_direction = 0U,
+    .longitude_direction = 0U,
     .card_id = "000000000000000000"
 };
+
+static uint8_t g_lcd_home_subpage = 0U; /* 0=主主界面 1=副主界面 */
+
 
 char speed_str[16];
 char time_str[16];
@@ -738,6 +752,14 @@ static rt_bool_t lcd_get_list_page_resources(lcd_page_id_t page_id,
                                              const uint16_t **title_text,
                                              uint8_t *title_count);
 static void lcd_render_home_ui(void);
+static void lcd_render_home_sub_ui(void);
+static void lcd_timestamp_to_local_ymdhm(uint32_t timestamp,
+                                         uint16_t *year,
+                                         uint8_t *month,
+                                         uint8_t *day,
+                                         uint8_t *hour,
+                                         uint8_t *minute);
+
 static void lcd_render_menu_ui(void);
 static void lcd_render_drive_record_submenu_ui(void);
 static void lcd_render_submenu_ui(void);
@@ -889,6 +911,63 @@ static uint16_t lcd_u8g2_get_unicode_seq_width(u8g2_t *u8g2,
     }
 
     return width;
+}
+
+static void lcd_timestamp_to_local_ymdhm(uint32_t timestamp,
+                                         uint16_t *year,
+                                         uint8_t *month,
+                                         uint8_t *day,
+                                         uint8_t *hour,
+                                         uint8_t *minute)
+{
+    uint32_t local_seconds;
+    uint32_t days;
+    uint32_t secs_of_day;
+    int32_t z;
+    int32_t era;
+    uint32_t doe;
+    uint32_t yoe;
+    uint32_t doy;
+    uint32_t mp;
+    uint32_t d;
+    uint32_t m;
+    uint32_t y;
+
+    local_seconds = timestamp + 8U * 3600U;
+    days = local_seconds / 86400U;
+    secs_of_day = local_seconds % 86400U;
+
+    z = (int32_t)days + 719468;
+    era = (z >= 0 ? z : z - 146096) / 146097;
+    doe = (uint32_t)(z - era * 146097);
+    yoe = (doe - doe / 1460U + doe / 36524U - doe / 146096U) / 365U;
+    y = yoe + (uint32_t)era * 400U;
+    doy = doe - (365U * yoe + yoe / 4U - yoe / 100U);
+    mp = (5U * doy + 2U) / 153U;
+    d = doy - (153U * mp + 2U) / 5U + 1U;
+    if (mp < 10U) {
+        m = mp + 3U;
+    } else {
+        m = mp - 9U;
+        y += 1U;
+    }
+
+
+    if (year != RT_NULL) {
+        *year = (uint16_t)y;
+    }
+    if (month != RT_NULL) {
+        *month = (uint8_t)m;
+    }
+    if (day != RT_NULL) {
+        *day = (uint8_t)d;
+    }
+    if (hour != RT_NULL) {
+        *hour = (uint8_t)(secs_of_day / 3600U);
+    }
+    if (minute != RT_NULL) {
+        *minute = (uint8_t)((secs_of_day % 3600U) / 60U);
+    }
 }
 
 
@@ -2918,6 +2997,45 @@ void svc_lcd_update_card_id(const char *card_id)
                                card_id);
 }
 
+void svc_lcd_update_home_location(uint32_t latitude,
+                                  uint32_t longitude,
+                                  uint8_t latitude_direction,
+                                  uint8_t longitude_direction,
+                                  uint32_t timestamp)
+{
+    rt_bool_t changed = RT_FALSE;
+
+    if (g_lcd_home_ui.latitude != latitude) {
+        g_lcd_home_ui.latitude = latitude;
+        changed = RT_TRUE;
+    }
+
+    if (g_lcd_home_ui.longitude != longitude) {
+        g_lcd_home_ui.longitude = longitude;
+        changed = RT_TRUE;
+    }
+
+    if (g_lcd_home_ui.latitude_direction != latitude_direction) {
+        g_lcd_home_ui.latitude_direction = latitude_direction;
+        changed = RT_TRUE;
+    }
+
+    if (g_lcd_home_ui.longitude_direction != longitude_direction) {
+        g_lcd_home_ui.longitude_direction = longitude_direction;
+        changed = RT_TRUE;
+    }
+
+    if (g_lcd_home_ui.timestamp != timestamp) {
+        g_lcd_home_ui.timestamp = timestamp;
+        changed = RT_TRUE;
+    }
+
+    if ((changed == RT_TRUE) && (g_lcd_current_page_id == LCD_PAGE_HOME)) {
+        g_lcd_need_redraw = RT_TRUE;
+    }
+}
+
+
 void svc_lcd_update_overtime_drive_count(uint16_t count)
 {
     if (g_lcd_overtime_drive_count != count) {
@@ -3130,6 +3248,12 @@ static void lcd_render_home_ui(void)
         return;
     }
 
+    if (g_lcd_home_subpage != 0U) {
+        lcd_render_home_sub_ui();
+        return;
+    }
+
+
     u8g2_port_clear_buffer();
 
 
@@ -3178,6 +3302,82 @@ static void lcd_render_home_ui(void)
 
     u8g2_port_flush_buffer();
 }
+
+static void lcd_render_home_sub_ui(void)
+{
+    u8g2_t *u8g2;
+    char lat_str[24];
+    char lon_str[24];
+    char date_time_str[24];
+    uint16_t year;
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t minute;
+    char lat_prefix[2] = "";
+    char lon_prefix[2] = "";
+
+    static const uint16_t g_lat_text[] = {
+        0x7EAC, 0x5EA6, 0xFF1A /* 纬度： */
+    };
+    static const uint16_t g_lon_text[] = {
+        0x7ECF, 0x5EA6, 0xFF1A /* 经度： */
+    };
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    /* 第一行状态栏保持不变 */
+    lcd_u8g2_draw_top_icons(u8g2, 2, 2);
+
+    if (g_lcd_home_ui.latitude_direction != 0U) {
+        lat_prefix[0] = '-';
+        lat_prefix[1] = '\0';
+    }
+
+    if (g_lcd_home_ui.longitude_direction != 0U) {
+        lon_prefix[0] = '-';
+        lon_prefix[1] = '\0';
+    }
+
+    rt_snprintf(lat_str, sizeof(lat_str), "%s%lu.%06lu",
+                lat_prefix,
+                (unsigned long)(g_lcd_home_ui.latitude / 1000000U),
+                (unsigned long)(g_lcd_home_ui.latitude % 1000000U));
+
+    rt_snprintf(lon_str, sizeof(lon_str), "%s%lu.%06lu",
+                lon_prefix,
+                (unsigned long)(g_lcd_home_ui.longitude / 1000000U),
+                (unsigned long)(g_lcd_home_ui.longitude % 1000000U));
+
+    lcd_timestamp_to_local_ymdhm(g_lcd_home_ui.timestamp,
+                                 &year, &month, &day, &hour, &minute);
+
+    rt_snprintf(date_time_str, sizeof(date_time_str), "%u.%u.%u    %02u:%02u",
+                (unsigned int)year,
+                (unsigned int)month,
+                (unsigned int)day,
+                (unsigned int)hour,
+                (unsigned int)minute);
+
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 24, g_lat_text, 3);
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 40, g_lon_text, 3);
+
+    u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+    u8g2_DrawStr(u8g2, 40, 24, lat_str);
+    u8g2_DrawStr(u8g2, 40, 40, lon_str);
+    u8g2_DrawStr(u8g2, 8, 56, date_time_str);
+
+    u8g2_port_flush_buffer();
+}
+
 
 static void lcd_render_boot_check_ui(void)
 {
@@ -3274,6 +3474,45 @@ static void svc_lcd_thread_entry(void *arg)
 
     while (1)
     {
+
+        if (g_lcd_current_page_id == LCD_PAGE_HOME) {
+            if (svc_adc_consume_s1_event() == RT_TRUE) {
+                rt_thread_mdelay(10);
+                continue;
+            }
+
+            if ((svc_adc_consume_s2_event() == RT_TRUE) ||
+                (svc_adc_consume_s3_event() == RT_TRUE)) {
+                g_lcd_home_subpage = (g_lcd_home_subpage == 0U) ? 1U : 0U;
+                g_lcd_need_redraw = RT_TRUE;
+
+                lcd_page_handle_auto_return();
+                lcd_page_handle_dynamic_refresh();
+
+                if (g_lcd_need_redraw == RT_TRUE) {
+                    lcd_render_current_page();
+                    g_lcd_need_redraw = RT_FALSE;
+                }
+
+                rt_thread_mdelay(10);
+                continue;
+            }
+
+            if (svc_adc_consume_s4_event() == RT_TRUE) {
+                lcd_page_enter(LCD_PAGE_MAIN_MENU);
+
+                lcd_page_handle_auto_return();
+                lcd_page_handle_dynamic_refresh();
+
+                if (g_lcd_need_redraw == RT_TRUE) {
+                    lcd_render_current_page();
+                    g_lcd_need_redraw = RT_FALSE;
+                }
+
+                rt_thread_mdelay(10);
+                continue;
+            }
+        }
 
         if (lcd_handle_local_phone_keys() == RT_TRUE) {
             lcd_page_handle_auto_return();
@@ -3662,6 +3901,8 @@ static rt_bool_t lcd_handle_local_phone_keys(void)
             if (g_lcd_local_phone_cursor < 10U) {
                 g_lcd_local_phone_cursor++;
             }
+/*
+*/
 
             g_lcd_local_phone_selected_digit =
                 (uint8_t)(g_lcd_local_phone_digits[g_lcd_local_phone_cursor] - '0');

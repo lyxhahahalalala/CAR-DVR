@@ -35,6 +35,12 @@ void svc_lcd_update_card_id(const char *card_id);
 void svc_lcd_update_overtime_drive_count(uint16_t count);
 void svc_lcd_update_total_mileage(uint32_t odo_km, uint16_t odo_rem_m);
 
+void svc_lcd_update_home_location(uint32_t latitude,
+                                  uint32_t longitude,
+                                  uint8_t latitude_direction,
+                                  uint8_t longitude_direction,
+                                  uint32_t timestamp);
+
 
 
 #endif /* APPLICATIONS_SVC_LCD_H_ */

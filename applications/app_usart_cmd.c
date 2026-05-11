@@ -844,6 +844,11 @@ void app_usart_cmd_poll(void)
         svc_lcd_update_home_speed(msg.driver_speed);
         svc_lcd_update_drive_time(drive_hour, drive_minute, drive_second);
         svc_lcd_update_card_id(driver_number_str);
+        svc_lcd_update_home_location(msg.latitude,
+                                     msg.longitude,
+                                     msg.latitude_direction,
+                                     msg.longitude_direction,
+                                     msg.timestamp);
 
     }
 }
