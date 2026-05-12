@@ -14,8 +14,13 @@
 #define APP_UART_CMD_DEV_NAME            "uart3"
 #define APP_UART_CMD_FRAME_HEAD          0xAAU
 #define APP_UART_CMD_FRAME_TAIL          0x55U
-#define APP_UART_CMD_FRAME_MAX_SIZE      128U
-#define APP_UART_CMD_RX_BUF_SIZE         256U
+#define APP_UART_CMD_FRAME_MAX_SIZE      256U
+#define APP_UART_CMD_RX_BUF_SIZE         4096U
+
+#define APP_UART_CMD_TEXT_MAX_SIZE       4096U
+#define APP_UART_CMD_TEXT_FRAME_TYPE     0x02U
+#define APP_UART_CMD_TEXT_BUF_SIZE       (APP_UART_CMD_TEXT_MAX_SIZE + 1U)
+
 #define APP_UART_CMD_ACK_RET_OK          1U
 #define APP_UART_CMD_ACK_RET_ERR         0U
 
@@ -80,6 +85,14 @@ typedef struct
 } app_soc_status_msg_t;
 
 
+typedef struct
+{
+    uint8_t valid;
+    uint8_t flag;
+    uint8_t text_type;
+    uint16_t text_len;
+    char text[APP_UART_CMD_TEXT_BUF_SIZE];
+} app_uart_cmd_text_msg_t;
 
 
 
@@ -96,6 +109,6 @@ void app_usart_cmd_poll(void);
 const app_uart_cmd_frame_t *app_usart_cmd_get_last_frame(void);
 rt_bool_t app_usart_cmd_send_ack(uint8_t type, uint8_t ret);
 rt_bool_t app_usart_cmd_send_mcu_version(void);
-
+rt_bool_t app_usart_cmd_get_text_msg(app_uart_cmd_text_msg_t *msg);
 
 #endif /* APPLICATIONS_APP_USART_CMD_H_ */

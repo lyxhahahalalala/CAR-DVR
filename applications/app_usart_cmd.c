@@ -21,6 +21,8 @@ static app_uart_cmd_frame_t g_uart_cmd_last_frame;
 static app_uart_cmd_tx_fn_t g_uart_cmd_tx_cb = RT_NULL;
 static rt_device_t g_uart_cmd_dev = RT_NULL;
 static struct rt_semaphore g_uart_cmd_rx_sem;
+static app_uart_cmd_text_msg_t g_uart_cmd_text_msg;
+static uint16_t g_uart_cmd_text_assem_len = 0U;
 
 typedef struct APP_PACKED_STRUCT
 {
@@ -622,6 +624,113 @@ static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame
     return RT_TRUE;
 }
 
+static rt_bool_t app_uart_cmd_parse_text_frame(const app_uart_cmd_frame_t *frame)
+{
+    uint8_t payload_len;
+    uint8_t transfer_state;
+    uint8_t flag;
+    uint8_t text_type;
+    uint16_t chunk_len;
+    uint8_t text_offset;
+
+    if (frame == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if ((frame->length < 7U) ||
+        (frame->data[0] != APP_UART_CMD_FRAME_HEAD) ||
+        (frame->data[2] != APP_UART_CMD_TEXT_FRAME_TYPE)) {
+        return RT_FALSE;
+    }
+
+    payload_len = (uint8_t)(frame->length - 6U); /* 去掉 head len cmd crc tail */
+    if (payload_len < 2U) {
+        return RT_FALSE;
+    }
+
+    transfer_state = frame->data[3];
+
+    /*
+     * 首包格式：
+     *   cmd, state, flag, type, text...
+     *
+     * 续包格式：
+     *   cmd, state, text...
+     */
+    if (g_uart_cmd_text_assem_len == 0U) {
+        if (payload_len < 3U) {
+            return RT_FALSE;
+        }
+
+        flag = frame->data[4];
+        text_type = frame->data[5];
+
+        if ((text_type != 1U) && (text_type != 2U)) {
+            rt_kprintf("[uart_cmd][text] invalid first header state=%u flag=0x%02X type=%u len=%u\n",
+                       transfer_state,
+                       flag,
+                       text_type,
+                       frame->length);
+            g_uart_cmd_text_assem_len = 0U;
+            g_uart_cmd_text_msg.valid = 0U;
+            return RT_FALSE;
+        }
+
+        g_uart_cmd_text_msg.flag = flag;
+        g_uart_cmd_text_msg.text_type = text_type;
+
+        text_offset = 6U;
+        chunk_len = (uint16_t)(payload_len - 3U);
+    } else {
+        flag = g_uart_cmd_text_msg.flag;
+        text_type = g_uart_cmd_text_msg.text_type;
+
+        text_offset = 4U;
+        chunk_len = (uint16_t)(payload_len - 1U);
+    }
+
+    if ((g_uart_cmd_text_assem_len + chunk_len) > APP_UART_CMD_TEXT_MAX_SIZE) {
+        rt_kprintf("[uart_cmd][text] overflow chunk=%u total=%u\n",
+                   (unsigned int)chunk_len,
+                   (unsigned int)(g_uart_cmd_text_assem_len + chunk_len));
+        g_uart_cmd_text_assem_len = 0U;
+        g_uart_cmd_text_msg.valid = 0U;
+        return RT_FALSE;
+    }
+
+    rt_memcpy(&g_uart_cmd_text_msg.text[g_uart_cmd_text_assem_len],
+              &frame->data[text_offset],
+              chunk_len);
+    g_uart_cmd_text_assem_len = (uint16_t)(g_uart_cmd_text_assem_len + chunk_len);
+    g_uart_cmd_text_msg.text[g_uart_cmd_text_assem_len] = '\0';
+
+    rt_kprintf("[uart_cmd][text] state=%u flag=0x%02X type=%u chunk=%u total=%u\n",
+               transfer_state,
+               flag,
+               text_type,
+               (unsigned int)chunk_len,
+               (unsigned int)g_uart_cmd_text_assem_len);
+
+    if (transfer_state == 1U) {
+        g_uart_cmd_text_msg.valid = 1U;
+        g_uart_cmd_text_msg.flag = flag;
+        g_uart_cmd_text_msg.text_type = text_type;
+        g_uart_cmd_text_msg.text_len = g_uart_cmd_text_assem_len;
+
+        svc_lcd_update_text_message(g_uart_cmd_text_msg.flag,
+                                    g_uart_cmd_text_msg.text_type,
+                                    g_uart_cmd_text_msg.text,
+                                    g_uart_cmd_text_msg.text_len);
+
+        rt_kprintf("[uart_cmd][text done] len=%u\n",
+                   (unsigned int)g_uart_cmd_text_msg.text_len);
+
+        g_uart_cmd_text_assem_len = 0U;
+    }
+
+    return RT_TRUE;
+}
+
 
 
 static void app_usart_cmd_thread_entry(void *parameter)
@@ -652,6 +761,9 @@ int app_usart_cmd_init(void)
     rt_memset(&g_uart_cmd_rx_ring, 0, sizeof(g_uart_cmd_rx_ring));
     rt_memset(&g_uart_cmd_last_frame, 0, sizeof(g_uart_cmd_last_frame));
     g_uart_cmd_tx_cb = RT_NULL;
+
+    rt_memset(&g_uart_cmd_text_msg, 0, sizeof(g_uart_cmd_text_msg));
+    g_uart_cmd_text_assem_len = 0U;
 
     result = rt_sem_init(&g_uart_cmd_rx_sem, "uart_cmd", 0, RT_IPC_FLAG_FIFO);
     if (result != RT_EOK) {
@@ -717,8 +829,13 @@ void app_usart_cmd_set_tx_callback(app_uart_cmd_tx_fn_t tx_cb)
 
 void app_usart_cmd_push_byte(uint8_t byte)
 {
-    (void)app_uart_cmd_ring_push(&g_uart_cmd_rx_ring, byte);
+    if (app_uart_cmd_ring_push(&g_uart_cmd_rx_ring, byte) != RT_TRUE) {
+        rt_kprintf("[uart_cmd][ring overflow] drop=0x%02X count=%u\n",
+                   byte,
+                   g_uart_cmd_rx_ring.count);
+    }
 }
+
 
 const app_uart_cmd_frame_t *app_usart_cmd_get_last_frame(void)
 {
@@ -762,7 +879,7 @@ rt_bool_t app_usart_cmd_send_mcu_version(void)
         return RT_FALSE;
     }
 
-    app_uart_cmd_dump_tx_frame("mcu", tx_buf, tx_len);
+    //app_uart_cmd_dump_tx_frame("mcu", tx_buf, tx_len);
 
 
     g_uart_cmd_tx_cb(tx_buf, tx_len);
@@ -789,18 +906,25 @@ void app_usart_cmd_poll(void)
 
         g_uart_cmd_last_frame = frame;
 
+        if (frame.data[2] == APP_UART_CMD_TEXT_FRAME_TYPE) {
+            app_uart_cmd_parse_text_frame(&frame);
+            continue;
+        }
+
         app_uart_cmd_dump_frame(frame.data, frame.length);
+
 
         if (app_uart_cmd_parse_soc_status(&frame, &msg) != RT_TRUE) {
             continue;
         }
+
 
         app_uart_cmd_time_to_hms(msg.timestamp, &hour, &minute, &second);
         app_uart_cmd_seconds_to_hms(msg.driver_time, &drive_hour, &drive_minute, &drive_second);
         app_uart_cmd_bcd_to_str18(msg.driver_number, driver_number_str);
         app_uart_cmd_update_total_mileage(msg.driver_speed, msg.timestamp);
 
-
+        /*
         rt_kprintf("[uart_cmd][soc] cam=%u%u%u%u rec=%u loc=%u ic=%u udisk=%u ip=%u%u gsm=%u sd=%u sim_status=%u sim_signal=%u lat_dir=%u lon_dir=%u lat=0x%08lX lon=0x%08lX total=%luKB free=%luKB ts=0x%08X drv=%lu spd=%u driver=%s\n",
 
 
@@ -838,6 +962,7 @@ void app_usart_cmd_poll(void)
         rt_kprintf("[uart_cmd][time] %02u:%02u:%02u drive=%02u:%02u:%02u\n",
                    hour, minute, second,
                    drive_hour, drive_minute, drive_second);
+        */
 
         svc_lcd_update_home_time(hour, minute, second);
         svc_lcd_update_top_status(msg.used_satellite);
@@ -852,3 +977,14 @@ void app_usart_cmd_poll(void)
 
     }
 }
+
+rt_bool_t app_usart_cmd_get_text_msg(app_uart_cmd_text_msg_t *msg)
+{
+    if ((msg == RT_NULL) || (g_uart_cmd_text_msg.valid == 0U)) {
+        return RT_FALSE;
+    }
+
+    rt_memcpy(msg, &g_uart_cmd_text_msg, sizeof(app_uart_cmd_text_msg_t));
+    return RT_TRUE;
+}
+

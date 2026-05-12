@@ -148,7 +148,21 @@ static lcd_home_ui_data_t g_lcd_home_ui = {
 };
 
 static uint8_t g_lcd_home_subpage = 0U; /* 0=主主界面 1=副主界面 */
+#define LCD_TEXT_MSG_MAX_LEN        4096U
+#define LCD_TEXT_MSG_LINES_PER_PAGE 3U
+#define LCD_TEXT_MSG_LINE_MAX_CHARS 10U
 
+typedef struct
+{
+    uint8_t valid;
+    uint8_t flag;
+    uint8_t text_type;
+    uint16_t text_len;
+    char text[LCD_TEXT_MSG_MAX_LEN + 1U];
+    uint16_t page_index;
+    uint16_t page_count;
+} lcd_text_msg_t;
+static lcd_text_msg_t g_lcd_text_msg;
 
 char speed_str[16];
 char time_str[16];
@@ -516,6 +530,12 @@ static void svc_lcd_spi_hw_init(void)
 #endif
     gpio_write_pin(LCD_DAT_GPIO_CTRL, LCD_DAT_GPIO_INDEX, LCD_DAT_PIN, 0);
 }
+
+static void lcd_render_info_center_text_normal_ui(void);
+static rt_bool_t lcd_handle_text_normal_keys(void);
+static uint16_t lcd_utf8_next_codepoint(const char *s, uint16_t *consumed);
+static void lcd_prepare_text_normal_page(void);
+
 
 static void svc_lcd_ctrl_pins_init(void)
 {
@@ -894,6 +914,51 @@ static uint16_t lcd_u8g2_draw_unicode_seq(u8g2_t *u8g2,
 
     return x;
 }
+
+static uint16_t lcd_utf8_next_codepoint(const char *s, uint16_t *consumed)
+{
+    const uint8_t *p = (const uint8_t *)s;
+
+    if ((s == RT_NULL) || (p[0] == '\0')) {
+        if (consumed != RT_NULL) {
+            *consumed = 0U;
+        }
+        return 0U;
+    }
+
+    if (p[0] < 0x80U) {
+        if (consumed != RT_NULL) {
+            *consumed = 1U;
+        }
+        return p[0];
+    }
+
+    if (((p[0] & 0xE0U) == 0xC0U) && (p[1] != '\0')) {
+        if (consumed != RT_NULL) {
+            *consumed = 2U;
+        }
+        return (uint16_t)(((p[0] & 0x1FU) << 6) |
+                          (p[1] & 0x3FU));
+    }
+
+    if (((p[0] & 0xF0U) == 0xE0U) &&
+        (p[1] != '\0') &&
+        (p[2] != '\0')) {
+        if (consumed != RT_NULL) {
+            *consumed = 3U;
+        }
+        return (uint16_t)(((p[0] & 0x0FU) << 12) |
+                          ((p[1] & 0x3FU) << 6) |
+                          (p[2] & 0x3FU));
+    }
+
+    if (consumed != RT_NULL) {
+        *consumed = 1U;
+    }
+    return '?';
+}
+
+
 
 static uint16_t lcd_u8g2_get_unicode_seq_width(u8g2_t *u8g2,
                                                const uint16_t *codes,
@@ -2317,11 +2382,12 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         0U,
         0U,
         RT_FALSE,
-        lcd_render_submenu_ui,
+        lcd_render_info_center_text_normal_ui,
         RT_NULL,
         0U,
         LCD_PAGE_MAX
     },
+
     [LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT_FAULT] = {
         LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT_FAULT,
         LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT,
@@ -2569,6 +2635,9 @@ static void lcd_page_enter(lcd_page_id_t page_id)
     g_lcd_current_page_id = page_id;
     if (page_id == LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE) {
             lcd_prepare_local_phone_page();
+        }
+    if (page_id == LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT_NORMAL) {
+            lcd_prepare_text_normal_page();
         }
     g_lcd_menu_mode = (page_id != LCD_PAGE_HOME) ? RT_TRUE : RT_FALSE;
     g_lcd_page_enter_tick = rt_tick_get();
@@ -2933,6 +3002,148 @@ static rt_bool_t lcd_home_ui_set_data(uint16_t speed_kmh_x10,
     return changed;
 }
 
+static void lcd_render_info_center_text_normal_ui(void)
+{
+    u8g2_t *u8g2;
+    uint16_t i;
+    uint16_t offset;
+    uint16_t consumed;
+    uint16_t code;
+    uint16_t page_start_char;
+    uint16_t current_char_index;
+    uint8_t line;
+    uint16_t x;
+    uint16_t y;
+    uint8_t line_chars;
+    char page_str[16];
+
+    static const uint16_t g_no_text_text[] = {
+        0x65E0, 0x6587, 0x672C /* 无文本 */
+    };
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+
+    if ((g_lcd_text_msg.valid == 0U) || (g_lcd_text_msg.text_len == 0U)) {
+        lcd_u8g2_draw_unicode_seq(u8g2, 2, 28, g_no_text_text, 3);
+        u8g2_port_flush_buffer();
+        return;
+    }
+
+    /* 一页 3 行，每行最多 10 个字符，先按字符索引跳到页起点 */
+    page_start_char = (uint16_t)(g_lcd_text_msg.page_index *
+                                 LCD_TEXT_MSG_LINES_PER_PAGE *
+                                 LCD_TEXT_MSG_LINE_MAX_CHARS);
+
+    offset = 0U;
+    current_char_index = 0U;
+
+    while ((g_lcd_text_msg.text[offset] != '\0') &&
+           (current_char_index < page_start_char)) {
+        code = lcd_utf8_next_codepoint(&g_lcd_text_msg.text[offset], &consumed);
+        if ((code == 0U) || (consumed == 0U)) {
+            break;
+        }
+        offset = (uint16_t)(offset + consumed);
+        current_char_index++;
+    }
+
+    for (line = 0U; line < LCD_TEXT_MSG_LINES_PER_PAGE; line++) {
+        x = 2U;
+        y = (uint16_t)(16U + line * 16U);
+        line_chars = 0U;
+
+        while ((g_lcd_text_msg.text[offset] != '\0') &&
+               (line_chars < LCD_TEXT_MSG_LINE_MAX_CHARS)) {
+            code = lcd_utf8_next_codepoint(&g_lcd_text_msg.text[offset], &consumed);
+            if ((code == 0U) || (consumed == 0U)) {
+                break;
+            }
+
+            if ((code == '\r') || (code == '\n')) {
+                offset = (uint16_t)(offset + consumed);
+                break;
+            }
+
+            x += u8g2_DrawGlyph(u8g2, x, y, code);
+            offset = (uint16_t)(offset + consumed);
+            line_chars++;
+
+        }
+    }
+
+    /* 重新估算总页数 */
+    current_char_index = 0U;
+    offset = 0U;
+    while (g_lcd_text_msg.text[offset] != '\0') {
+        code = lcd_utf8_next_codepoint(&g_lcd_text_msg.text[offset], &consumed);
+        if ((code == 0U) || (consumed == 0U)) {
+            break;
+        }
+        offset = (uint16_t)(offset + consumed);
+        current_char_index++;
+    }
+
+    g_lcd_text_msg.page_count = (uint16_t)((current_char_index +
+        (LCD_TEXT_MSG_LINES_PER_PAGE * LCD_TEXT_MSG_LINE_MAX_CHARS) - 1U) /
+        (LCD_TEXT_MSG_LINES_PER_PAGE * LCD_TEXT_MSG_LINE_MAX_CHARS));
+
+    if (g_lcd_text_msg.page_count == 0U) {
+        g_lcd_text_msg.page_count = 1U;
+    }
+
+    rt_snprintf(page_str, sizeof(page_str), "%u/%u",
+                (unsigned int)(g_lcd_text_msg.page_index + 1U),
+                (unsigned int)g_lcd_text_msg.page_count);
+
+    u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+    u8g2_DrawStr(u8g2, 96, 62, page_str);
+
+    u8g2_port_flush_buffer();
+}
+
+static rt_bool_t lcd_handle_text_normal_keys(void)
+{
+    if (g_lcd_current_page_id != LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT_NORMAL) {
+        return RT_FALSE;
+    }
+
+    if (svc_adc_consume_s1_event() == RT_TRUE) {
+        lcd_page_enter(LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT);
+        return RT_TRUE;
+    }
+
+    if (svc_adc_consume_s2_event() == RT_TRUE) {
+        if (g_lcd_text_msg.page_index > 0U) {
+            g_lcd_text_msg.page_index--;
+            g_lcd_need_redraw = RT_TRUE;
+        }
+        return RT_TRUE;
+    }
+
+    if (svc_adc_consume_s3_event() == RT_TRUE) {
+        if ((g_lcd_text_msg.page_count > 0U) &&
+            ((g_lcd_text_msg.page_index + 1U) < g_lcd_text_msg.page_count)) {
+            g_lcd_text_msg.page_index++;
+            g_lcd_need_redraw = RT_TRUE;
+        }
+        return RT_TRUE;
+    }
+
+    if (svc_adc_consume_s4_event() == RT_TRUE) {
+        return RT_TRUE;
+    }
+
+    return RT_TRUE;
+}
+
 
 void svc_lcd_update_home_time(uint8_t hour, uint8_t minute, uint8_t second)
 {
@@ -3035,6 +3246,42 @@ void svc_lcd_update_home_location(uint32_t latitude,
     }
 }
 
+void svc_lcd_update_text_message(uint8_t flag,
+                                 uint8_t text_type,
+                                 const char *utf8_text,
+                                 uint16_t text_len)
+{
+    uint16_t copy_len;
+
+    if (utf8_text == RT_NULL) {
+        return;
+    }
+
+    if (text_len > LCD_TEXT_MSG_MAX_LEN) {
+        copy_len = LCD_TEXT_MSG_MAX_LEN;
+    } else {
+        copy_len = text_len;
+    }
+
+    g_lcd_text_msg.valid = 1U;
+    g_lcd_text_msg.flag = flag;
+    g_lcd_text_msg.text_type = text_type;
+    g_lcd_text_msg.text_len = copy_len;
+    rt_memcpy(g_lcd_text_msg.text, utf8_text, copy_len);
+    g_lcd_text_msg.text[copy_len] = '\0';
+    g_lcd_text_msg.page_index = 0U;
+    g_lcd_text_msg.page_count = 0U;
+
+    if (g_lcd_current_page_id == LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT_NORMAL) {
+        g_lcd_need_redraw = RT_TRUE;
+    }
+}
+
+static void lcd_prepare_text_normal_page(void)
+{
+    g_lcd_text_msg.page_index = 0U;
+    g_lcd_text_msg.page_count = 1U;
+}
 
 void svc_lcd_update_overtime_drive_count(uint16_t count)
 {
@@ -3512,6 +3759,18 @@ static void svc_lcd_thread_entry(void *arg)
                 rt_thread_mdelay(10);
                 continue;
             }
+        }
+        if (lcd_handle_text_normal_keys() == RT_TRUE) {
+            lcd_page_handle_auto_return();
+            lcd_page_handle_dynamic_refresh();
+
+            if (g_lcd_need_redraw == RT_TRUE) {
+                lcd_render_current_page();
+                g_lcd_need_redraw = RT_FALSE;
+            }
+
+            rt_thread_mdelay(10);
+            continue;
         }
 
         if (lcd_handle_local_phone_keys() == RT_TRUE) {

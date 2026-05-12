@@ -40,6 +40,10 @@ void svc_lcd_update_home_location(uint32_t latitude,
                                   uint8_t latitude_direction,
                                   uint8_t longitude_direction,
                                   uint32_t timestamp);
+void svc_lcd_update_text_message(uint8_t flag,
+                                 uint8_t text_type,
+                                 const char *utf8_text,
+                                 uint16_t text_len);
 
 
 
