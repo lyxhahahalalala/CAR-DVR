@@ -8,15 +8,7 @@
 #include "svc_storage.h"
 #include "LCD/lcd_drv.h"
 #include "LCD/lcd_graphics.h"
-#include "LCD/lcd_ui_core.h"
-#include "LCD/lcd_ui_data.h"
-#include "LCD/lcd_ui_draw.h"
-#include "LCD/lcd_ui_list.h"
-#include "LCD/lcd_ui_nav.h"
-#include "LCD/lcd_ui_pages.h"
-#include "LCD/lcd_ui_refresh.h"
-#include "LCD/lcd_ui_render.h"
-#include "LCD/lcd_ui_time.h"
+#include "LCD/lcd_ui.h"
 
 #define LCD_COLS                    132
 #define LCD_PAGES                   8
