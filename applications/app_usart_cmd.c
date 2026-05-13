@@ -170,6 +170,7 @@ static rt_bool_t app_uart_cmd_check_crc(const uint8_t *buf, uint8_t len)
 
 static rt_bool_t app_uart_cmd_try_parse_frame(app_uart_cmd_frame_t *frame)
 {
+    /* 串口收到的是连续字节流，这里用状态机切出完整协议帧。 */
     static uint8_t state = 0U;
     static uint8_t temp[APP_UART_CMD_FRAME_MAX_SIZE];
     static uint8_t index = 0U;
@@ -391,6 +392,7 @@ static rt_err_t app_uart_cmd_rx_indicate(rt_device_t dev, rt_size_t size)
         }
     }
 
+    /* 回调里只搬字节，真正解析放到线程里做，避免阻塞串口接收。 */
     if (has_data == RT_TRUE) {
         rt_sem_release(&g_uart_cmd_rx_sem);
     }
@@ -626,6 +628,13 @@ static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame
 
 static rt_bool_t app_uart_cmd_parse_text_frame(const app_uart_cmd_frame_t *frame)
 {
+    /*
+     * 文本消息分包规则：
+     * 1. 首包：cmd + state + flag + type + text
+     * 2. 续包：cmd + state + text
+     *
+     * 所以这里不能把所有分包都按同一种偏移处理，否则 UTF-8 会从错误字节开始拼接。
+     */
     uint8_t payload_len;
     uint8_t transfer_state;
     uint8_t flag;
@@ -689,6 +698,7 @@ static rt_bool_t app_uart_cmd_parse_text_frame(const app_uart_cmd_frame_t *frame
         chunk_len = (uint16_t)(payload_len - 1U);
     }
 
+    /* 缓存上限按“整条消息”控制，超过上限就丢弃这条文本。 */
     if ((g_uart_cmd_text_assem_len + chunk_len) > APP_UART_CMD_TEXT_MAX_SIZE) {
         rt_kprintf("[uart_cmd][text] overflow chunk=%u total=%u\n",
                    (unsigned int)chunk_len,
@@ -698,6 +708,7 @@ static rt_bool_t app_uart_cmd_parse_text_frame(const app_uart_cmd_frame_t *frame
         return RT_FALSE;
     }
 
+    /* 正文保持原始 UTF-8 顺序拼接，显示阶段再逐字符解码。 */
     rt_memcpy(&g_uart_cmd_text_msg.text[g_uart_cmd_text_assem_len],
               &frame->data[text_offset],
               chunk_len);
@@ -712,6 +723,7 @@ static rt_bool_t app_uart_cmd_parse_text_frame(const app_uart_cmd_frame_t *frame
                (unsigned int)g_uart_cmd_text_assem_len);
 
     if (transfer_state == 1U) {
+        /* state==1 表示整条文本已经收完，此时才把消息标记为有效。 */
         g_uart_cmd_text_msg.valid = 1U;
         g_uart_cmd_text_msg.flag = flag;
         g_uart_cmd_text_msg.text_type = text_type;

@@ -14,9 +14,10 @@
 #define SVC_STORAGE_MAGIC            0x4D494C45UL /* MILE */
 #define SVC_STORAGE_VERSION          1U
 
-#define SVC_STORAGE_LOCAL_PHONE_ADDR     0x0040U
-#define SVC_STORAGE_PHONE_MAGIC          0x50484F4EUL /* PHON */
-#define SVC_STORAGE_PHONE_VERSION        1U
+#define SVC_STORAGE_CONFIG_ADDR          0x0040U
+#define SVC_STORAGE_CONFIG_MAGIC         0x434F4E46UL /* CONF */
+#define SVC_STORAGE_CONFIG_VERSION       1U
+
 
 typedef struct
 {
@@ -34,9 +35,14 @@ typedef struct
     uint32_t magic;
     uint16_t version;
     uint16_t length;
-    char digits[12];
+    char local_phone[12];
+    uint8_t plate_class;
+    uint8_t plate_color;
+    uint8_t reserved[2];
     uint32_t checksum;
-} svc_storage_phone_record_t;
+} svc_storage_config_record_t;
+
+
 
 static struct rt_i2c_bus_device *g_eeprom_i2c_bus = RT_NULL;
 
@@ -46,7 +52,11 @@ static svc_storage_mileage_t g_storage_mileage_shadow = {
     .reserved = 0U
 };
 
-static const char g_default_local_phone[12] = "00000000000";
+static const svc_storage_config_t g_default_config = {
+    .local_phone = "00000000000",
+    .plate_class = 1U,
+    .plate_color = 1U
+};
 
 static uint32_t svc_storage_checksum(const uint8_t *data, uint16_t len)
 {
@@ -63,6 +73,16 @@ static uint32_t svc_storage_checksum(const uint8_t *data, uint16_t len)
 
     return sum;
 }
+
+static void svc_storage_config_set_default(svc_storage_config_t *config)
+{
+    if (config == RT_NULL) {
+        return;
+    }
+
+    rt_memcpy(config, &g_default_config, sizeof(svc_storage_config_t));
+}
+
 
 static rt_bool_t svc_eeprom_write_page(uint16_t mem_addr, const uint8_t *data, uint16_t len)
 {
@@ -190,7 +210,21 @@ static rt_bool_t svc_storage_phone_digits_valid(const char *digits)
     return (digits[11] == '\0') ? RT_TRUE : RT_FALSE;
 }
 
-static rt_bool_t svc_storage_phone_record_is_valid(const svc_storage_phone_record_t *record)
+
+
+static rt_bool_t svc_storage_plate_class_valid(uint8_t plate_class)
+{
+    return ((plate_class >= 1U) && (plate_class <= 5U)) ? RT_TRUE : RT_FALSE;
+}
+
+
+
+static rt_bool_t svc_storage_plate_color_valid(uint8_t plate_color)
+{
+    return ((plate_color >= 1U) && (plate_color <= 5U)) ? RT_TRUE : RT_FALSE;
+}
+
+static rt_bool_t svc_storage_config_record_is_valid(const svc_storage_config_record_t *record)
 {
     uint32_t checksum;
 
@@ -198,21 +232,30 @@ static rt_bool_t svc_storage_phone_record_is_valid(const svc_storage_phone_recor
         return RT_FALSE;
     }
 
-    if ((record->magic != SVC_STORAGE_PHONE_MAGIC) ||
-        (record->version != SVC_STORAGE_PHONE_VERSION) ||
-        (record->length != sizeof(svc_storage_phone_record_t))) {
+    if ((record->magic != SVC_STORAGE_CONFIG_MAGIC) ||
+        (record->version != SVC_STORAGE_CONFIG_VERSION) ||
+        (record->length != sizeof(svc_storage_config_record_t))) {
         return RT_FALSE;
     }
 
-    if (svc_storage_phone_digits_valid(record->digits) != RT_TRUE) {
+    if (svc_storage_phone_digits_valid(record->local_phone) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    if (svc_storage_plate_class_valid(record->plate_class) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    if (svc_storage_plate_color_valid(record->plate_color) != RT_TRUE) {
         return RT_FALSE;
     }
 
     checksum = svc_storage_checksum((const uint8_t *)record,
-                                    (uint16_t)(sizeof(svc_storage_phone_record_t) - sizeof(uint32_t)));
+                                    (uint16_t)(sizeof(svc_storage_config_record_t) - sizeof(uint32_t)));
 
     return (checksum == record->checksum) ? RT_TRUE : RT_FALSE;
 }
+
 
 
 static void svc_storage_thread_entry(void *arg)
@@ -345,72 +388,180 @@ rt_bool_t svc_storage_save_mileage(const svc_storage_mileage_t *mileage)
     return RT_TRUE;
 }
 
+rt_bool_t svc_storage_load_config(svc_storage_config_t *config)
+{
+    svc_storage_config_record_t record;
+
+    if (config == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if ((g_eeprom_i2c_bus == RT_NULL) ||
+        (svc_eeprom_read(SVC_STORAGE_CONFIG_ADDR,
+                         (uint8_t *)&record,
+                         sizeof(record)) != RT_TRUE) ||
+        (svc_storage_config_record_is_valid(&record) != RT_TRUE)) {
+        svc_storage_config_set_default(config);
+        APP_NON_CAN_LOG("EEPROM: no valid config, use defaults\r\n");
+        return RT_FALSE;
+    }
+
+    rt_memcpy(config->local_phone, record.local_phone, sizeof(config->local_phone));
+    config->plate_class = record.plate_class;
+    config->plate_color = record.plate_color;
+
+    APP_NON_CAN_LOG("EEPROM: load config phone=%s class=%u color=%u\r\n",
+                    config->local_phone,
+                    (unsigned int)config->plate_class,
+                    (unsigned int)config->plate_color);
+    return RT_TRUE;
+}
+
+rt_bool_t svc_storage_save_config(const svc_storage_config_t *config)
+{
+    svc_storage_config_record_t record;
+    svc_storage_config_record_t verify;
+
+    if ((config == RT_NULL) ||
+        (svc_storage_phone_digits_valid(config->local_phone) != RT_TRUE) ||
+        (svc_storage_plate_class_valid(config->plate_class) != RT_TRUE) ||
+        (svc_storage_plate_color_valid(config->plate_color) != RT_TRUE)) {
+        return RT_FALSE;
+    }
+
+    if (g_eeprom_i2c_bus == RT_NULL) {
+        APP_NON_CAN_LOG("EEPROM: save config failed, bus null\r\n");
+        return RT_FALSE;
+    }
+
+    rt_memset(&record, 0, sizeof(record));
+    record.magic = SVC_STORAGE_CONFIG_MAGIC;
+    record.version = SVC_STORAGE_CONFIG_VERSION;
+    record.length = sizeof(record);
+    rt_memcpy(record.local_phone, config->local_phone, sizeof(record.local_phone));
+    record.plate_class = config->plate_class;
+    record.plate_color = config->plate_color;
+    record.checksum = svc_storage_checksum((const uint8_t *)&record,
+                                           (uint16_t)(sizeof(record) - sizeof(uint32_t)));
+
+    if (svc_eeprom_write(SVC_STORAGE_CONFIG_ADDR,
+                         (const uint8_t *)&record,
+                         sizeof(record)) != RT_TRUE) {
+        APP_NON_CAN_LOG("EEPROM: save config write failed\r\n");
+        return RT_FALSE;
+    }
+
+    if (svc_eeprom_read(SVC_STORAGE_CONFIG_ADDR,
+                        (uint8_t *)&verify,
+                        sizeof(verify)) != RT_TRUE) {
+        APP_NON_CAN_LOG("EEPROM: save config verify read failed\r\n");
+        return RT_FALSE;
+    }
+
+    if (svc_storage_config_record_is_valid(&verify) != RT_TRUE) {
+        APP_NON_CAN_LOG("EEPROM: save config verify invalid\r\n");
+        return RT_FALSE;
+    }
+
+    APP_NON_CAN_LOG("EEPROM: save config phone=%s class=%u color=%u\r\n",
+                    config->local_phone,
+                    (unsigned int)config->plate_class,
+                    (unsigned int)config->plate_color);
+    return RT_TRUE;
+}
+
+
 rt_bool_t svc_storage_load_local_phone(svc_storage_phone_t *phone)
 {
-    svc_storage_phone_record_t record;
+    svc_storage_config_t config;
+    rt_bool_t result;
 
     if (phone == RT_NULL) {
         return RT_FALSE;
     }
 
-    if ((g_eeprom_i2c_bus == RT_NULL) ||
-        (svc_eeprom_read(SVC_STORAGE_LOCAL_PHONE_ADDR,
-                         (uint8_t *)&record,
-                         sizeof(record)) != RT_TRUE) ||
-        (svc_storage_phone_record_is_valid(&record) != RT_TRUE)) {
-        rt_memcpy(phone->digits, g_default_local_phone, sizeof(phone->digits));
-        APP_NON_CAN_LOG("EEPROM: no valid local phone, use default %s\r\n", phone->digits);
-        return RT_FALSE;
-    }
-
-    rt_memcpy(phone->digits, record.digits, sizeof(phone->digits));
-    APP_NON_CAN_LOG("EEPROM: load local phone %s\r\n", phone->digits);
-    return RT_TRUE;
+    result = svc_storage_load_config(&config);
+    rt_memcpy(phone->digits, config.local_phone, sizeof(phone->digits));
+    return result;
 }
 
 rt_bool_t svc_storage_save_local_phone(const svc_storage_phone_t *phone)
 {
-    svc_storage_phone_record_t record;
-    svc_storage_phone_record_t verify;
+    svc_storage_config_t config;
 
     if ((phone == RT_NULL) ||
         (svc_storage_phone_digits_valid(phone->digits) != RT_TRUE)) {
         return RT_FALSE;
     }
 
-    if (g_eeprom_i2c_bus == RT_NULL) {
-        APP_NON_CAN_LOG("EEPROM: save local phone failed, bus null\r\n");
-        return RT_FALSE;
-    }
+    (void)svc_storage_load_config(&config);
+    rt_memcpy(config.local_phone, phone->digits, sizeof(config.local_phone));
 
-    rt_memset(&record, 0, sizeof(record));
-    record.magic = SVC_STORAGE_PHONE_MAGIC;
-    record.version = SVC_STORAGE_PHONE_VERSION;
-    record.length = sizeof(record);
-    rt_memcpy(record.digits, phone->digits, sizeof(record.digits));
-    record.checksum = svc_storage_checksum((const uint8_t *)&record,
-                                           (uint16_t)(sizeof(record) - sizeof(uint32_t)));
-
-    if (svc_eeprom_write(SVC_STORAGE_LOCAL_PHONE_ADDR,
-                         (const uint8_t *)&record,
-                         sizeof(record)) != RT_TRUE) {
-        APP_NON_CAN_LOG("EEPROM: save local phone write failed\r\n");
-        return RT_FALSE;
-    }
-
-    if (svc_eeprom_read(SVC_STORAGE_LOCAL_PHONE_ADDR,
-                        (uint8_t *)&verify,
-                        sizeof(verify)) != RT_TRUE) {
-        APP_NON_CAN_LOG("EEPROM: save local phone verify read failed\r\n");
-        return RT_FALSE;
-    }
-
-    if (svc_storage_phone_record_is_valid(&verify) != RT_TRUE) {
-        APP_NON_CAN_LOG("EEPROM: save local phone verify invalid\r\n");
-        return RT_FALSE;
-    }
-
-    APP_NON_CAN_LOG("EEPROM: save local phone %s\r\n", phone->digits);
-    return RT_TRUE;
+    return svc_storage_save_config(&config);
 }
+
+
+rt_bool_t svc_storage_load_plate_class(svc_storage_plate_class_t *plate_class)
+{
+    svc_storage_config_t config;
+    rt_bool_t result;
+
+    if (plate_class == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    result = svc_storage_load_config(&config);
+    plate_class->plate_class = config.plate_class;
+    return result;
+}
+
+rt_bool_t svc_storage_save_plate_class(const svc_storage_plate_class_t *plate_class)
+{
+    svc_storage_config_t config;
+
+    if ((plate_class == RT_NULL) ||
+        (svc_storage_plate_class_valid(plate_class->plate_class) != RT_TRUE)) {
+        return RT_FALSE;
+    }
+
+    (void)svc_storage_load_config(&config);
+    config.plate_class = plate_class->plate_class;
+
+    return svc_storage_save_config(&config);
+}
+
+
+rt_bool_t svc_storage_load_plate_color(svc_storage_plate_color_t *plate_color)
+{
+    svc_storage_config_t config;
+    rt_bool_t result;
+
+    if (plate_color == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    result = svc_storage_load_config(&config);
+    plate_color->plate_color = config.plate_color;
+    return result;
+}
+
+
+rt_bool_t svc_storage_save_plate_color(const svc_storage_plate_color_t *plate_color)
+{
+    svc_storage_config_t config;
+
+    if ((plate_color == RT_NULL) ||
+        (svc_storage_plate_color_valid(plate_color->plate_color) != RT_TRUE)) {
+        return RT_FALSE;
+    }
+
+    (void)svc_storage_load_config(&config);
+    config.plate_color = plate_color->plate_color;
+
+
+
+
+    return svc_storage_save_config(&config);
+}
+
 

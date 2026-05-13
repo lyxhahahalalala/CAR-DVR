@@ -208,6 +208,12 @@ typedef enum
     LCD_PAGE_SYSTEM_SETTING_BACKLIGHT_TIME,
     LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL,
     LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
+    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_VIN,
+    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_SET,
+    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR,
+    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_CLASS,
+    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PROVINCE_ID,
+    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_CITY_ID,
     LCD_PAGE_SYSTEM_SETTING_HOST_PARAM,
     LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE,
     LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SOS_PHONE,
@@ -512,6 +518,70 @@ static const uint8_t g_vehicle_info_setting_item_counts_u8g2[] = {
     5, 4, 4, 4, 4, 4
 };
 
+static const uint16_t g_vehicle_plate_class_item_1[] = {
+    0x4E58, 0x7528, 0x8F66 /* 乘用车 */
+};
+
+static const uint16_t g_vehicle_plate_class_item_2[] = {
+    0x8D27, 0x8F66 /* 货车 */
+};
+
+static const uint16_t g_vehicle_plate_class_item_3[] = {
+    0x4E13, 0x7528, 0x6C7D, 0x8F66 /* 专用汽车 */
+};
+
+static const uint16_t g_vehicle_plate_class_item_4[] = {
+    0x6302, 0x8F66 /* 挂车 */
+};
+
+static const uint16_t g_vehicle_plate_class_item_5[] = {
+    0x6C7D, 0x8F66, 0x5217, 0x8F66 /* 汽车列车 */
+};
+
+static const uint16_t *const g_vehicle_plate_class_item_texts_u8g2[] = {
+    g_vehicle_plate_class_item_1,
+    g_vehicle_plate_class_item_2,
+    g_vehicle_plate_class_item_3,
+    g_vehicle_plate_class_item_4,
+    g_vehicle_plate_class_item_5
+};
+
+static const uint8_t g_vehicle_plate_class_item_counts_u8g2[] = {
+    3, 2, 4, 2, 4
+};
+
+static const uint16_t g_vehicle_plate_color_item_1[] = {
+    0x84DD, 0x8272 /* 蓝色 */
+};
+
+static const uint16_t g_vehicle_plate_color_item_2[] = {
+    0x9EC4, 0x8272 /* 黄色 */
+};
+
+static const uint16_t g_vehicle_plate_color_item_3[] = {
+    0x767D, 0x8272 /* 白色 */
+};
+
+static const uint16_t g_vehicle_plate_color_item_4[] = {
+    0x9ED1, 0x8272 /* 黑色 */
+};
+
+static const uint16_t g_vehicle_plate_color_item_5[] = {
+    0x7EFF, 0x8272 /* 绿色 */
+};
+
+static const uint16_t *const g_vehicle_plate_color_item_texts_u8g2[] = {
+    g_vehicle_plate_color_item_1,
+    g_vehicle_plate_color_item_2,
+    g_vehicle_plate_color_item_3,
+    g_vehicle_plate_color_item_4,
+    g_vehicle_plate_color_item_5
+};
+
+static const uint8_t g_vehicle_plate_color_item_counts_u8g2[] = {
+    2, 2, 2, 2, 2
+};
+
 
 static void svc_lcd_spi_hw_init(void)
 {
@@ -796,6 +866,12 @@ static void lcd_render_key_volume_ui(void);
 static void lcd_render_common_config_ok_ui(void);
 static void lcd_page_confirm_key_volume(void);
 static void lcd_page_confirm_backlight_time(void);
+static void lcd_page_confirm_vehicle_plate_class(void);
+static void lcd_prepare_vehicle_plate_class_page(void);
+static void lcd_page_confirm_vehicle_plate_color(void);
+static void lcd_prepare_vehicle_plate_color_page(void);
+
+
 static void lcd_render_brightness_menu_ui(void);
 static void lcd_render_backlight_time_ui(void);
 static void lcd_render_brightness_level_ui(void);
@@ -917,6 +993,10 @@ static uint16_t lcd_u8g2_draw_unicode_seq(u8g2_t *u8g2,
 
 static uint16_t lcd_utf8_next_codepoint(const char *s, uint16_t *consumed)
 {
+    /*
+     * LCD 绘制用的是 Unicode 码点，SoC 文本缓存里保存的是 UTF-8 字节流。
+     * 这里每次从当前位置解出一个字符，同时返回本次消耗的字节数。
+     */
     const uint8_t *p = (const uint8_t *)s;
 
     if ((s == RT_NULL) || (p[0] == '\0')) {
@@ -952,6 +1032,7 @@ static uint16_t lcd_utf8_next_codepoint(const char *s, uint16_t *consumed)
                           (p[2] & 0x3FU));
     }
 
+    /* 不认识的字节序列退化成 '?'，避免坏数据把整页显示拖死。 */
     if (consumed != RT_NULL) {
         *consumed = 1U;
     }
@@ -2232,12 +2313,22 @@ static const lcd_page_id_t g_brightness_setting_children[] = {
     LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL
 };
 
+static const lcd_page_id_t g_vehicle_info_children[] = {
+    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_VIN,
+    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_SET,
+    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR,
+    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_CLASS,
+    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PROVINCE_ID,
+    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_CITY_ID
+};
+
 static const lcd_page_id_t g_host_param_children[] = {
     LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE,
     LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SOS_PHONE,
     LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SERVER1,
     LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SERVER2
 };
+
 
 
 static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
@@ -2503,8 +2594,8 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
         LCD_PAGE_SYSTEM_SETTING_MENU,
         LCD_PAGE_KIND_LIST,
-        RT_NULL,
-        0U,
+        g_vehicle_info_children,
+        6U,
         6U,
         RT_FALSE,
         lcd_render_drive_record_submenu_ui,
@@ -2512,6 +2603,89 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         0U,
         LCD_PAGE_MAX
     },
+
+    [LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_VIN] = {
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_VIN,
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
+        LCD_PAGE_KIND_VIEW,
+        RT_NULL,
+        0U,
+        0U,
+        RT_FALSE,
+        lcd_render_submenu_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
+    [LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_SET] = {
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_SET,
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
+        LCD_PAGE_KIND_VIEW,
+        RT_NULL,
+        0U,
+        0U,
+        RT_FALSE,
+        lcd_render_submenu_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
+    [LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR] = {
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR,
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
+        LCD_PAGE_KIND_LIST,
+        RT_NULL,
+        0U,
+        5U,
+        RT_FALSE,
+        lcd_render_drive_record_submenu_ui,
+        lcd_page_confirm_vehicle_plate_color,
+        0U,
+        LCD_PAGE_MAX
+    },
+
+
+    [LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_CLASS] = {
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_CLASS,
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
+        LCD_PAGE_KIND_LIST,
+        RT_NULL,
+        0U,
+        5U,
+        RT_FALSE,
+        lcd_render_drive_record_submenu_ui,
+        lcd_page_confirm_vehicle_plate_class,
+        0U,
+        LCD_PAGE_MAX
+    },
+    [LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PROVINCE_ID] = {
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PROVINCE_ID,
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
+        LCD_PAGE_KIND_VIEW,
+        RT_NULL,
+        0U,
+        0U,
+        RT_FALSE,
+        lcd_render_submenu_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
+    [LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_CITY_ID] = {
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_CITY_ID,
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
+        LCD_PAGE_KIND_VIEW,
+        RT_NULL,
+        0U,
+        0U,
+        RT_FALSE,
+        lcd_render_submenu_ui,
+        RT_NULL,
+        0U,
+        LCD_PAGE_MAX
+    },
+
+
     [LCD_PAGE_SYSTEM_SETTING_HOST_PARAM] = {
         LCD_PAGE_SYSTEM_SETTING_HOST_PARAM,
         LCD_PAGE_SYSTEM_SETTING_MENU,
@@ -2633,12 +2807,23 @@ static void lcd_page_enter(lcd_page_id_t page_id)
     }
 
     g_lcd_current_page_id = page_id;
+
+
     if (page_id == LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE) {
-            lcd_prepare_local_phone_page();
-        }
+        lcd_prepare_local_phone_page();
+    }
+
+    if (page_id == LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_CLASS) {
+        lcd_prepare_vehicle_plate_class_page();
+    }
+    if (page_id == LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR) {
+        lcd_prepare_vehicle_plate_color_page();
+    }
+
     if (page_id == LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT_NORMAL) {
-            lcd_prepare_text_normal_page();
-        }
+        lcd_prepare_text_normal_page();
+    }
+
     g_lcd_menu_mode = (page_id != LCD_PAGE_HOME) ? RT_TRUE : RT_FALSE;
     g_lcd_page_enter_tick = rt_tick_get();
     g_lcd_need_redraw = RT_TRUE;
@@ -2670,6 +2855,33 @@ static void lcd_prepare_local_phone_page(void)
     g_lcd_local_phone_selected_digit = (uint8_t)(g_lcd_local_phone_digits[0] - '0');
 }
 
+static void lcd_prepare_vehicle_plate_class_page(void)
+{
+    svc_storage_plate_class_t plate_class;
+    uint8_t selected = 0U;
+
+    if (svc_storage_load_plate_class(&plate_class) == RT_TRUE) {
+        if ((plate_class.plate_class >= 1U) && (plate_class.plate_class <= 5U)) {
+            selected = (uint8_t)(plate_class.plate_class - 1U);
+        }
+    }
+
+    g_lcd_page_selected[LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_CLASS] = selected;
+}
+
+static void lcd_prepare_vehicle_plate_color_page(void)
+{
+    svc_storage_plate_color_t plate_color;
+    uint8_t selected = 0U;
+
+    if (svc_storage_load_plate_color(&plate_color) == RT_TRUE) {
+        if ((plate_color.plate_color >= 1U) && (plate_color.plate_color <= 5U)) {
+            selected = (uint8_t)(plate_color.plate_color - 1U);
+        }
+    }
+
+    g_lcd_page_selected[LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR] = selected;
+}
 
 
 static void lcd_page_confirm_load_status(void)
@@ -2705,6 +2917,30 @@ static void lcd_page_confirm_brightness_level(void)
      * 去写亮度配置和 EEPROM。
      */
     lcd_page_enter_common_ok(LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL);
+}
+
+static void lcd_page_confirm_vehicle_plate_class(void)
+{
+    svc_storage_plate_class_t plate_class;
+
+    plate_class.plate_class =
+        (uint8_t)(g_lcd_page_selected[LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_CLASS] + 1U);
+
+    if (svc_storage_save_plate_class(&plate_class) == RT_TRUE) {
+        lcd_page_enter_common_ok(LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_CLASS);
+    }
+}
+
+static void lcd_page_confirm_vehicle_plate_color(void)
+{
+    svc_storage_plate_color_t plate_color;
+
+    plate_color.plate_color =
+        (uint8_t)(g_lcd_page_selected[LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR] + 1U);
+
+    if (svc_storage_save_plate_color(&plate_color) == RT_TRUE) {
+        lcd_page_enter_common_ok(LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR);
+    }
 }
 
 
@@ -2907,6 +3143,23 @@ static rt_bool_t lcd_get_list_page_resources(lcd_page_id_t page_id,
         *title_count = 6U;
         return RT_TRUE;
 
+    case LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR:
+        *item_texts = g_vehicle_plate_color_item_texts_u8g2;
+        *item_counts = g_vehicle_plate_color_item_counts_u8g2;
+        *item_count = 5U;
+        *title_text = g_vehicle_info_setting_item_3;   /* 车牌颜色 */
+        *title_count = 4U;
+        return RT_TRUE;
+
+
+    case LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_CLASS:
+            *item_texts = g_vehicle_plate_class_item_texts_u8g2;
+            *item_counts = g_vehicle_plate_class_item_counts_u8g2;
+            *item_count = 5U;
+            *title_text = g_vehicle_info_setting_item_4;   /* 车牌分类 */
+            *title_count = 4U;
+            return RT_TRUE;
+
     case LCD_PAGE_DRIVE_RECORD_INFO_CENTER:
         *item_texts = g_info_center_item_texts_u8g2;
         *item_counts = g_info_center_item_counts_u8g2;
@@ -3004,6 +3257,10 @@ static rt_bool_t lcd_home_ui_set_data(uint16_t speed_kmh_x10,
 
 static void lcd_render_info_center_text_normal_ui(void)
 {
+    /*
+     * 文本信息页不做复杂自动排版，只按固定“3 行 x 10 字符”分页。
+     * 这样实现简单，内存占用也稳定，适合当前这块小屏。
+     */
     u8g2_t *u8g2;
     uint16_t i;
     uint16_t offset;
@@ -3038,6 +3295,7 @@ static void lcd_render_info_center_text_normal_ui(void)
     }
 
     /* 一页 3 行，每行最多 10 个字符，先按字符索引跳到页起点 */
+    /* 先跳到当前页起点，再从这里开始逐行绘制。 */
     page_start_char = (uint16_t)(g_lcd_text_msg.page_index *
                                  LCD_TEXT_MSG_LINES_PER_PAGE *
                                  LCD_TEXT_MSG_LINE_MAX_CHARS);
@@ -3067,6 +3325,7 @@ static void lcd_render_info_center_text_normal_ui(void)
                 break;
             }
 
+            /* 换行符只负责换行，不直接画到屏幕上。 */
             if ((code == '\r') || (code == '\n')) {
                 offset = (uint16_t)(offset + consumed);
                 break;
@@ -3080,6 +3339,7 @@ static void lcd_render_info_center_text_normal_ui(void)
     }
 
     /* 重新估算总页数 */
+    /* 重新扫描总字符数，用来给右下角页码计数。 */
     current_char_index = 0U;
     offset = 0U;
     while (g_lcd_text_msg.text[offset] != '\0') {
@@ -3257,6 +3517,10 @@ void svc_lcd_update_text_message(uint8_t flag,
         return;
     }
 
+    /*
+     * LCD 侧只缓存“最近一条”文本消息。
+     * 长度超过显示缓存上限时直接截断，避免页面层再处理越界。
+     */
     if (text_len > LCD_TEXT_MSG_MAX_LEN) {
         copy_len = LCD_TEXT_MSG_MAX_LEN;
     } else {
