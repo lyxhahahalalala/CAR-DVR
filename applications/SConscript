@@ -4,10 +4,10 @@ from building import *
 
 cwd = GetCurrentDir()
 
-src = Glob('*.c')
+src = Glob('*.c') + Glob('LCD/*.c')
 
 CPPDEFINES=[]
-CPPPATH = [cwd]
+CPPPATH = [cwd, cwd + '/LCD']
 
 group = DefineGroup('Applications', src, depend = [''], CPPPATH = CPPPATH, CPPDEFINES=CPPDEFINES)
 

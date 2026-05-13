@@ -37,6 +37,7 @@ RM := rm -rf
 -include libraries/hpm_sdk/arch/riscv/l1c/subdir.mk
 -include libraries/drivers/subdir.mk
 -include board/subdir.mk
+-include applications/LCD/subdir.mk
 -include applications/subdir.mk
 -include subdir.mk
 -include objects.mk

@@ -1,96 +1,22 @@
 #include <rtthread.h>
 
-#include "board.h"
-#include "hpm_gpiom_drv.h"
-#include "hpm_gpiom_soc_drv.h"
-#include "hpm_gpio_drv.h"
-#include "hpm_spi_drv.h"
 #include "app_config.h"
 #include "svc_lcd.h"
 #include "svc_adc.h"
 #include "u8g2_port.h"
 #include "svc_vehicle_io.h"
 #include "svc_storage.h"
-/*
- * LCD 相关控制脚，按当前已打通的连线整理如下：
- * PA03 -> LCD_RSTB      硬件复位，低有效
- * PC16 -> LCD_LED_A     背光阳极，高电平开启
- * PA28 -> LCD_CSN       SPI 片选，低有效（GPIO 控制）
- * PA29 -> LCD_A0        命令/数据选择，0=命令，1=数据
- * PA30 -> LCD_SCK       SPI 时钟
- * PA31 -> LCD_SDA       SPI 数据
- */
-
-#define LCD_RSTB_GPIO_CTRL      HPM_GPIO0
-#define LCD_RSTB_GPIO_INDEX     GPIO_DO_GPIOA
-#define LCD_RSTB_GPIO_OE        GPIO_OE_GPIOA
-#define LCD_RSTB_PIN            3
-
-#define LCD_BACKLIGHT_GPIO_CTRL  HPM_GPIO0
-#define LCD_BACKLIGHT_GPIO_INDEX GPIO_DO_GPIOC
-#define LCD_BACKLIGHT_GPIO_OE    GPIO_OE_GPIOC
-#define LCD_BACKLIGHT_PIN        16
-
-#define LCD_CSN_GPIO_CTRL       HPM_GPIO0
-#define LCD_CSN_GPIO_INDEX      GPIO_DO_GPIOA
-#define LCD_CSN_GPIO_OE         GPIO_OE_GPIOA
-#define LCD_CSN_PIN             28
-
-#define LCD_A0_GPIO_CTRL        HPM_GPIO0
-#define LCD_A0_GPIO_INDEX       GPIO_DO_GPIOA
-#define LCD_A0_GPIO_OE          GPIO_OE_GPIOA
-#define LCD_A0_PIN              29
-
-#define LCD_SCK_GPIO_CTRL       HPM_GPIO0
-#define LCD_SCK_GPIO_INDEX      GPIO_DO_GPIOA
-#define LCD_SCK_GPIO_OE         GPIO_OE_GPIOA
-#define LCD_SCK_PIN             30
-
-#define LCD_SDA_GPIO_CTRL       HPM_GPIO0
-#define LCD_SDA_GPIO_INDEX      GPIO_DO_GPIOA
-#define LCD_SDA_GPIO_OE         GPIO_OE_GPIOA
-#define LCD_SDA_PIN             31
-
-#define LCD_SW_SPI_SWAP_LINES   0
-#define LCD_SW_SPI_IDLE_HIGH    1
-
-#if LCD_SW_SPI_SWAP_LINES
-#define LCD_CLK_GPIO_CTRL       LCD_SDA_GPIO_CTRL
-#define LCD_CLK_GPIO_INDEX      LCD_SDA_GPIO_INDEX
-#define LCD_CLK_PIN             LCD_SDA_PIN
-#define LCD_DAT_GPIO_CTRL       LCD_SCK_GPIO_CTRL
-#define LCD_DAT_GPIO_INDEX      LCD_SCK_GPIO_INDEX
-#define LCD_DAT_PIN             LCD_SCK_PIN
-#else
-#define LCD_CLK_GPIO_CTRL       LCD_SCK_GPIO_CTRL
-#define LCD_CLK_GPIO_INDEX      LCD_SCK_GPIO_INDEX
-#define LCD_CLK_PIN             LCD_SCK_PIN
-#define LCD_DAT_GPIO_CTRL       LCD_SDA_GPIO_CTRL
-#define LCD_DAT_GPIO_INDEX      LCD_SDA_GPIO_INDEX
-#define LCD_DAT_PIN             LCD_SDA_PIN
-#endif
-
-#define ST7567_CMD_DISPLAY_ON       0xAF
-#define ST7567_CMD_SET_START_LINE   0x40
-#define ST7567_CMD_SET_PAGE         0xB0
-#define ST7567_CMD_SET_COL_HI       0x10
-#define ST7567_CMD_SET_COL_LO       0x00
-#define ST7567_CMD_SEG_NORMAL       0xA0
-#define ST7567_CMD_SEG_REVERSE      0xA1
-#define ST7567_CMD_INVERSE_OFF      0xA6
-#define ST7567_CMD_ALL_PIXEL_OFF    0xA4
-#define ST7567_CMD_BIAS_1_9         0xA2
-#define ST7567_CMD_COM_REVERSE      0xC8
-#define ST7567_CMD_POWER_ALL_ON     0x2F
-#define ST7567_CMD_REG_RATIO        0x20
-#define ST7567_CMD_SET_EV           0x81
-#define ST7567_CMD_SET_BOOSTER      0xF8
-#define ST7567_CMD_BOOSTER_X5       0x01
-#define ST7567_CMD_COM_NORMAL       0xC0
-
-
-#define ST7567_INIT_EV              0x28
-#define ST7567_INIT_REG_RATIO       0x07
+#include "LCD/lcd_drv.h"
+#include "LCD/lcd_graphics.h"
+#include "LCD/lcd_ui_core.h"
+#include "LCD/lcd_ui_data.h"
+#include "LCD/lcd_ui_draw.h"
+#include "LCD/lcd_ui_list.h"
+#include "LCD/lcd_ui_nav.h"
+#include "LCD/lcd_ui_pages.h"
+#include "LCD/lcd_ui_refresh.h"
+#include "LCD/lcd_ui_render.h"
+#include "LCD/lcd_ui_time.h"
 
 #define LCD_COLS                    132
 #define LCD_PAGES                   8
@@ -100,156 +26,26 @@
 #define LCD_UI_MARGIN_RIGHT         6
 #define LCD_UI_MARGIN_TOP           4
 #define LCD_UI_MARGIN_BOTTOM        4
-#define LCD_HW_COL_OFFSET           0//4
-
-
 /* Active LCD UI fonts */
 #define LCD_FONT_ASCII_SMALL    u8g2_font_6x10_tf
 #define LCD_FONT_CN_12          u8g2_font_wqy12_t_gb2312
 
-static uint8_t g_lcd_fb[LCD_PAGES][LCD_COLS];
 
 
 
-typedef struct
-{
-    uint16_t speed_kmh_x10;
-    uint8_t hour;
-    uint8_t minute;
-    uint8_t second;
-    uint8_t drive_hour;
-    uint8_t drive_minute;
-    uint8_t drive_second;
-    uint8_t top_status_value;
-    uint32_t latitude;
-    uint32_t longitude;
-    uint32_t timestamp;
-    uint8_t latitude_direction;
-    uint8_t longitude_direction;
-    char card_id[20];
-} lcd_home_ui_data_t;
 
-
-static lcd_home_ui_data_t g_lcd_home_ui = {
-    .speed_kmh_x10 = 0U,
-    .hour = 9U,
-    .minute = 16U,
-    .second = 45U,
-    .drive_hour = 0U,
-    .drive_minute = 0U,
-    .drive_second = 0U,
-    .top_status_value = 0U,
-    .latitude = 0U,
-    .longitude = 0U,
-    .timestamp = 0U,
-    .latitude_direction = 0U,
-    .longitude_direction = 0U,
-    .card_id = "000000000000000000"
-};
 
 static uint8_t g_lcd_home_subpage = 0U; /* 0=主主界面 1=副主界面 */
-#define LCD_TEXT_MSG_MAX_LEN        4096U
 #define LCD_TEXT_MSG_LINES_PER_PAGE 3U
 #define LCD_TEXT_MSG_LINE_MAX_CHARS 10U
 
-typedef struct
-{
-    uint8_t valid;
-    uint8_t flag;
-    uint8_t text_type;
-    uint16_t text_len;
-    char text[LCD_TEXT_MSG_MAX_LEN + 1U];
-    uint16_t page_index;
-    uint16_t page_count;
-} lcd_text_msg_t;
-static lcd_text_msg_t g_lcd_text_msg;
 
 char speed_str[16];
 char time_str[16];
 char drive_time_str[16];
 
-typedef enum
-{
-    LCD_PAGE_HOME = 0,
-    LCD_PAGE_MAIN_MENU,
-    LCD_PAGE_DRIVE_RECORD_MENU,
-    LCD_PAGE_DEVICE_STATUS_MENU,
-    LCD_PAGE_SYSTEM_SETTING_MENU,
-    LCD_PAGE_DRIVE_RECORD_FATIGUE,
-    LCD_PAGE_DRIVE_RECORD_LOCATION,
-    LCD_PAGE_DRIVE_RECORD_MILEAGE,
-    LCD_PAGE_DRIVE_RECORD_DRIVER_INFO,
-    LCD_PAGE_DRIVE_RECORD_VEHICLE_INFO,
-    LCD_PAGE_DRIVE_RECORD_LOAD_STATUS,
-    LCD_PAGE_DRIVE_RECORD_LOAD_STATUS_OK,
-    LCD_PAGE_DRIVE_RECORD_EXPORT,
-    LCD_PAGE_DRIVE_RECORD_INFO_CENTER,
-    LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT,
-    LCD_PAGE_DRIVE_RECORD_INFO_CENTER_BROADCAST,
-    LCD_PAGE_DRIVE_RECORD_INFO_CENTER_EVENT_REPORT,
-    LCD_PAGE_DRIVE_RECORD_INFO_CENTER_EWAYBILL,
-    LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT_DISPATCH,
-    LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT_NORMAL,
-    LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT_FAULT,
-    LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT_EMERGENCY,
-    LCD_PAGE_DRIVE_RECORD_VIN,
-    LCD_PAGE_DEVICE_STATUS_VERSION,
-    LCD_PAGE_DEVICE_STATUS_GFRS,
-    LCD_PAGE_DEVICE_STATUS_SELF_TEST,
-    LCD_PAGE_DEVICE_STATUS_LOCATION_MODULE,
-    LCD_PAGE_DEVICE_STATUS_VEHICLE,
-    LCD_PAGE_DEVICE_STATUS_STORAGE,
-    LCD_PAGE_DEVICE_STATUS_AV,
-    LCD_PAGE_DEVICE_STATUS_SPEED,
-    LCD_PAGE_DEVICE_STATUS_DRIVER_MONITOR,
-    LCD_PAGE_SYSTEM_SETTING_KEY_VOLUME,
-    LCD_PAGE_COMMON_CONFIG_OK,
-    LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS,
-    LCD_PAGE_SYSTEM_SETTING_BACKLIGHT_TIME,
-    LCD_PAGE_SYSTEM_SETTING_BRIGHTNESS_LEVEL,
-    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
-    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_VIN,
-    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_SET,
-    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR,
-    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_CLASS,
-    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PROVINCE_ID,
-    LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_CITY_ID,
-    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM,
-    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE,
-    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SOS_PHONE,
-    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SERVER1,
-    LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_SERVER2,
-
-
-    LCD_PAGE_SYSTEM_SETTING_INIT_MILEAGE,
-    LCD_PAGE_SYSTEM_SETTING_REGISTER,
-    LCD_PAGE_SYSTEM_SETTING_UNREGISTER,
-    LCD_PAGE_SYSTEM_SETTING_REC_VER,
-    LCD_PAGE_SYSTEM_SETTING_COMPONENT_VER,
-    LCD_PAGE_MAX
-} lcd_page_id_t;
-
-typedef enum
-{
-    LCD_PAGE_KIND_VIEW = 0,
-    LCD_PAGE_KIND_LIST,
-    LCD_PAGE_KIND_ACTION_RESULT
-} lcd_page_kind_t;
-
-typedef struct
-{
-    lcd_page_id_t page_id;
-    lcd_page_id_t parent_id;
-    lcd_page_kind_t kind;
-    const lcd_page_id_t *children;
-    uint8_t child_count;
-    uint8_t select_count;
-    rt_bool_t show_title;
-    void (*render)(void);
-    void (*on_confirm)(void);
-    uint32_t auto_return_ms;
-    lcd_page_id_t auto_return_target;
-} lcd_page_node_t;
+#define g_lcd_home_ui                 (*lcd_ui_data_get_home_mutable())
+#define g_lcd_text_msg                (*lcd_ui_data_get_text_mutable())
 
 static const uint8_t g_icon_signal_12x12[24] = {
     0x00,0x00,0x00,0xe0,0x3e,0xe0,0x1e,0xc0,
@@ -582,244 +378,99 @@ static const uint8_t g_vehicle_plate_color_item_counts_u8g2[] = {
     2, 2, 2, 2, 2
 };
 
+static const lcd_ui_list_resource_t g_lcd_list_resources[] = {
+    {
+        LCD_PAGE_DRIVE_RECORD_MENU,
+        g_drive_sub_item_texts_u8g2,
+        g_drive_sub_item_counts_u8g2,
+        9U,
+        g_menu_item_text_1,
+        4U
+    },
+    {
+        LCD_PAGE_DEVICE_STATUS_MENU,
+        g_device_sub_item_texts_u8g2,
+        g_device_sub_item_counts_u8g2,
+        9U,
+        g_menu_item_text_2,
+        4U
+    },
+    {
+        LCD_PAGE_SYSTEM_SETTING_MENU,
+        g_system_sub_item_texts_u8g2,
+        g_system_sub_item_counts_u8g2,
+        9U,
+        g_menu_item_text_3,
+        4U
+    },
+    {
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO,
+        g_vehicle_info_setting_item_texts_u8g2,
+        g_vehicle_info_setting_item_counts_u8g2,
+        6U,
+        g_system_sub_item_3,
+        6U
+    },
+    {
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR,
+        g_vehicle_plate_color_item_texts_u8g2,
+        g_vehicle_plate_color_item_counts_u8g2,
+        5U,
+        g_vehicle_info_setting_item_3,
+        4U
+    },
+    {
+        LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_CLASS,
+        g_vehicle_plate_class_item_texts_u8g2,
+        g_vehicle_plate_class_item_counts_u8g2,
+        5U,
+        g_vehicle_info_setting_item_4,
+        4U
+    },
+    {
+        LCD_PAGE_DRIVE_RECORD_INFO_CENTER,
+        g_info_center_item_texts_u8g2,
+        g_info_center_item_counts_u8g2,
+        4U,
+        g_drive_sub_item_8,
+        4U
+    },
+    {
+        LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT,
+        g_info_text_item_texts_u8g2,
+        g_info_text_item_counts_u8g2,
+        4U,
+        g_info_center_item_1,
+        4U
+    },
+    {
+        LCD_PAGE_SYSTEM_SETTING_HOST_PARAM,
+        g_host_param_item_texts_u8g2,
+        g_host_param_item_counts_u8g2,
+        4U,
+        g_system_sub_item_4,
+        6U
+    }
+};
 
-static void svc_lcd_spi_hw_init(void)
-{
-    HPM_IOC->PAD[IOC_PAD_PA30].FUNC_CTL = IOC_PA30_FUNC_CTL_GPIO_A_30;
-    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_SCK_PIN, gpiom_soc_gpio0);
-    gpio_set_pin_output(LCD_SCK_GPIO_CTRL, LCD_SCK_GPIO_OE, LCD_SCK_PIN);
-
-    HPM_IOC->PAD[IOC_PAD_PA31].FUNC_CTL = IOC_PA31_FUNC_CTL_GPIO_A_31;
-    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_SDA_PIN, gpiom_soc_gpio0);
-    gpio_set_pin_output(LCD_SDA_GPIO_CTRL, LCD_SDA_GPIO_OE, LCD_SDA_PIN);
-
-#if LCD_SW_SPI_IDLE_HIGH
-    gpio_write_pin(LCD_CLK_GPIO_CTRL, LCD_CLK_GPIO_INDEX, LCD_CLK_PIN, 1);
-#else
-    gpio_write_pin(LCD_CLK_GPIO_CTRL, LCD_CLK_GPIO_INDEX, LCD_CLK_PIN, 0);
-#endif
-    gpio_write_pin(LCD_DAT_GPIO_CTRL, LCD_DAT_GPIO_INDEX, LCD_DAT_PIN, 0);
-}
 
 static void lcd_render_info_center_text_normal_ui(void);
 static rt_bool_t lcd_handle_text_normal_keys(void);
 static uint16_t lcd_utf8_next_codepoint(const char *s, uint16_t *consumed);
 static void lcd_prepare_text_normal_page(void);
 
-
-static void svc_lcd_ctrl_pins_init(void)
-{
-    HPM_IOC->PAD[IOC_PAD_PA03].FUNC_CTL = IOC_PA03_FUNC_CTL_GPIO_A_03;
-    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_RSTB_PIN, gpiom_soc_gpio0);
-    gpio_set_pin_output(LCD_RSTB_GPIO_CTRL, LCD_RSTB_GPIO_OE, LCD_RSTB_PIN);
-
-    HPM_IOC->PAD[IOC_PAD_PC16].FUNC_CTL = IOC_PC16_FUNC_CTL_GPIO_C_16;
-    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOC, LCD_BACKLIGHT_PIN, gpiom_soc_gpio0);
-    gpio_set_pin_output(LCD_BACKLIGHT_GPIO_CTRL, LCD_BACKLIGHT_GPIO_OE, LCD_BACKLIGHT_PIN);
-
-    HPM_IOC->PAD[IOC_PAD_PA28].FUNC_CTL = IOC_PA28_FUNC_CTL_GPIO_A_28;
-    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_CSN_PIN, gpiom_soc_gpio0);
-    gpio_set_pin_output(LCD_CSN_GPIO_CTRL, LCD_CSN_GPIO_OE, LCD_CSN_PIN);
-
-    HPM_IOC->PAD[IOC_PAD_PA29].FUNC_CTL = IOC_PA29_FUNC_CTL_GPIO_A_29;
-    gpiom_set_pin_controller(HPM_GPIOM, GPIOM_ASSIGN_GPIOA, LCD_A0_PIN, gpiom_soc_gpio0);
-    gpio_set_pin_output(LCD_A0_GPIO_CTRL, LCD_A0_GPIO_OE, LCD_A0_PIN);
-}
-
-static void lcd_spi_delay_us(void)
-{
-    board_delay_us(1);
-}
-
-static void lcd_sck_set(rt_bool_t high)
-{
-    gpio_write_pin(LCD_CLK_GPIO_CTRL, LCD_CLK_GPIO_INDEX, LCD_CLK_PIN, high ? 1 : 0);
-}
-
-static void lcd_sda_set(rt_bool_t high)
-{
-    gpio_write_pin(LCD_DAT_GPIO_CTRL, LCD_DAT_GPIO_INDEX, LCD_DAT_PIN, high ? 1 : 0);
-}
-
-void lcd_reset(void)
-{
-    gpio_write_pin(LCD_RSTB_GPIO_CTRL, LCD_RSTB_GPIO_INDEX, LCD_RSTB_PIN, 0);
-    rt_thread_mdelay(20);
-    gpio_write_pin(LCD_RSTB_GPIO_CTRL, LCD_RSTB_GPIO_INDEX, LCD_RSTB_PIN, 1);
-    rt_thread_mdelay(5);
-}
-
-void lcd_rst_set(rt_bool_t active)
-{
-    gpio_write_pin(LCD_RSTB_GPIO_CTRL, LCD_RSTB_GPIO_INDEX, LCD_RSTB_PIN, active ? 0 : 1);
-}
-
-void lcd_backlight_on(void)
-{
-    gpio_write_pin(LCD_BACKLIGHT_GPIO_CTRL, LCD_BACKLIGHT_GPIO_INDEX, LCD_BACKLIGHT_PIN, 1);
-}
-
-void lcd_backlight_off(void)
-{
-    gpio_write_pin(LCD_BACKLIGHT_GPIO_CTRL, LCD_BACKLIGHT_GPIO_INDEX, LCD_BACKLIGHT_PIN, 0);
-}
-
-void lcd_a0_set(rt_bool_t is_data)
-{
-    gpio_write_pin(LCD_A0_GPIO_CTRL, LCD_A0_GPIO_INDEX, LCD_A0_PIN, is_data ? 1 : 0);
-}
-
-void lcd_csn_set(rt_bool_t active)
-{
-    gpio_write_pin(LCD_CSN_GPIO_CTRL, LCD_CSN_GPIO_INDEX, LCD_CSN_PIN, active ? 0 : 1);
-}
-
-static void lcd_spi_write_byte(uint8_t byte)
-{
-    for (uint8_t bit = 0; bit < 8; bit++) {
-#if LCD_SW_SPI_IDLE_HIGH
-        lcd_sck_set(RT_TRUE);
-        lcd_sda_set((byte & 0x80U) != 0U ? RT_TRUE : RT_FALSE);
-        lcd_spi_delay_us();
-        lcd_sck_set(RT_FALSE);
-        lcd_spi_delay_us();
-#else
-        lcd_sck_set(RT_FALSE);
-        lcd_sda_set((byte & 0x80U) != 0U ? RT_TRUE : RT_FALSE);
-        lcd_spi_delay_us();
-        lcd_sck_set(RT_TRUE);
-        lcd_spi_delay_us();
-#endif
-        byte <<= 1;
-    }
-
-#if LCD_SW_SPI_IDLE_HIGH
-    lcd_sck_set(RT_TRUE);
-#else
-    lcd_sck_set(RT_FALSE);
-#endif
-}
-
-void lcd_spi_send_byte(uint8_t byte)
-{
-    lcd_spi_write_byte(byte);
-}
-
-static void lcd_write_cmd(uint8_t cmd)
-{
-    lcd_csn_set(RT_TRUE);
-    lcd_a0_set(RT_FALSE);
-    lcd_spi_write_byte(cmd);
-    lcd_csn_set(RT_FALSE);
-}
-
-static void lcd_write_data_buf(const uint8_t *buf, uint16_t len)
-{
-    lcd_csn_set(RT_TRUE);
-    lcd_a0_set(RT_TRUE);
-
-    while (len-- > 0U) {
-        lcd_spi_write_byte(*buf++);
-    }
-
-    lcd_csn_set(RT_FALSE);
-}
-
-static void lcd_set_page_col(uint8_t page, uint8_t col)
-{
-    uint8_t hw_col = (uint8_t)(col + LCD_HW_COL_OFFSET);
-
-    if (hw_col >= LCD_COLS) {
-        hw_col = (uint8_t)(hw_col - LCD_COLS);
-    }
-
-    lcd_write_cmd(ST7567_CMD_SET_PAGE | (page & 0x0F));
-    lcd_write_cmd(ST7567_CMD_SET_COL_HI | ((hw_col >> 4) & 0x0F));
-    lcd_write_cmd(ST7567_CMD_SET_COL_LO | (hw_col & 0x0F));
-}
-
-void lcd_clear(void)
-{
-    static const uint8_t zeros[LCD_COLS] = {0};
-    for (uint8_t page = 0; page < LCD_PAGES; page++) {
-        lcd_set_page_col(page, 0);
-        lcd_write_data_buf(zeros, LCD_COLS);
-    }
-}
-
-void lcd_fill_all(void)
-{
-    static uint8_t ones[LCD_COLS];
-    for (uint8_t i = 0; i < LCD_COLS; i++) {
-        ones[i] = 0xFF;
-    }
-    for (uint8_t page = 0; page < LCD_PAGES; page++) {
-        lcd_set_page_col(page, 0);
-        lcd_write_data_buf(ones, LCD_COLS);
-    }
-}
-
-static void lcd_fb_clear(void)
-{
-    rt_memset(g_lcd_fb, 0, sizeof(g_lcd_fb));
-}
-
-static void lcd_fb_set_pixel(uint8_t x, uint8_t y, rt_bool_t on)
-{
-    uint8_t page;
-    uint8_t bit;
-
-    if ((x >= LCD_COLS) || (y >= LCD_ROWS)) {
-        return;
-    }
-
-    page = (uint8_t)(y / 8U);
-    bit = 7U - (y % 8U);
-
-    if (on) {
-        g_lcd_fb[page][x] |= (uint8_t)(1U << bit);
-    } else {
-        g_lcd_fb[page][x] &= (uint8_t)~(1U << bit);
-    }
-}
-
-
-static void lcd_fb_hline(uint8_t x, uint8_t y, uint8_t len)
-{
-    for (uint8_t i = 0; i < len; i++) {
-        lcd_fb_set_pixel((uint8_t)(x + i), y, RT_TRUE);
-    }
-}
-
-static void lcd_fb_vline(uint8_t x, uint8_t y, uint8_t len)
-{
-    for (uint8_t i = 0; i < len; i++) {
-        lcd_fb_set_pixel(x, (uint8_t)(y + i), RT_TRUE);
-    }
-}
-
-static void lcd_fb_fill_rect(uint8_t x, uint8_t y, uint8_t w, uint8_t h)
-{
-    for (uint8_t yy = 0; yy < h; yy++) {
-        for (uint8_t xx = 0; xx < w; xx++) {
-            lcd_fb_set_pixel((uint8_t)(x + xx), (uint8_t)(y + yy), RT_TRUE);
-        }
-    }
-}
-
-static rt_bool_t g_lcd_menu_mode = RT_FALSE;
-static lcd_page_id_t g_lcd_current_page_id = LCD_PAGE_HOME;
-static uint8_t g_lcd_page_selected[LCD_PAGE_MAX];
-static rt_tick_t g_lcd_page_enter_tick = 0U;
-static rt_bool_t g_lcd_need_redraw = RT_TRUE;
-static lcd_page_id_t g_lcd_common_ok_return_page = LCD_PAGE_HOME;
-static rt_tick_t g_lcd_vehicle_status_check_tick = 0U;
-static uint16_t g_lcd_vehicle_status_last_bits = 0xFFFFU;
-static uint16_t g_lcd_overtime_drive_count = 0U;
-static uint32_t g_lcd_total_mileage_km = 0U;
-static uint16_t g_lcd_total_mileage_rem_m = 0U;
 static uint8_t g_lcd_load_status_index = 0U;   /* 0=空载 1=半载 2=满载 */
 static rt_tick_t g_lcd_load_status_ok_tick = 0U;
+
+#define g_lcd_menu_mode              (*lcd_ui_core_menu_mode_mutable())
+#define g_lcd_current_page_id        (*lcd_ui_core_current_page_mutable())
+#define g_lcd_page_selected          (lcd_ui_core_page_selected_mutable())
+#define g_lcd_page_enter_tick        (*lcd_ui_core_page_enter_tick_mutable())
+#define g_lcd_need_redraw            (*lcd_ui_core_need_redraw_mutable())
+#define g_lcd_common_ok_return_page  (*lcd_ui_core_common_ok_return_page_mutable())
+#define g_lcd_overtime_drive_count    (*lcd_ui_data_get_overtime_drive_count_mutable())
+#define g_lcd_total_mileage_km        (*lcd_ui_data_get_total_mileage_km_mutable())
+#define g_lcd_total_mileage_rem_m     (*lcd_ui_data_get_total_mileage_rem_m_mutable())
 
 #define LCD_LOCAL_PHONE_FOCUS_NUMBER   0U
 #define LCD_LOCAL_PHONE_FOCUS_DIGIT    1U
@@ -833,23 +484,8 @@ static uint8_t g_lcd_local_phone_func_index = 1U; /* 0=退出 1=保存 */
 
 
 
-static const lcd_page_node_t *lcd_get_page_node(lcd_page_id_t page_id);
-static uint8_t lcd_page_get_depth(lcd_page_id_t page_id);
-static rt_bool_t lcd_get_list_page_resources(lcd_page_id_t page_id,
-                                             const uint16_t *const **item_texts,
-                                             const uint8_t **item_counts,
-                                             uint8_t *item_count,
-                                             const uint16_t **title_text,
-                                             uint8_t *title_count);
 static void lcd_render_home_ui(void);
 static void lcd_render_home_sub_ui(void);
-static void lcd_timestamp_to_local_ymdhm(uint32_t timestamp,
-                                         uint16_t *year,
-                                         uint8_t *month,
-                                         uint8_t *day,
-                                         uint8_t *hour,
-                                         uint8_t *minute);
-
 static void lcd_render_menu_ui(void);
 static void lcd_render_drive_record_submenu_ui(void);
 static void lcd_render_submenu_ui(void);
@@ -879,23 +515,6 @@ static void lcd_page_confirm_brightness_level(void);
 static void lcd_render_local_phone_ui(void);
 static void lcd_prepare_local_phone_page(void);
 static rt_bool_t lcd_handle_local_phone_keys(void);
-static void lcd_fb_flush(void);
-
-void lcd_fb_public_clear(void)
-{
-    lcd_fb_clear();
-}
-
-void lcd_fb_public_set_pixel(uint8_t x, uint8_t y, rt_bool_t on)
-{
-    lcd_fb_set_pixel(x, y, on);
-}
-
-
-void lcd_fb_public_flush(void)
-{
-    lcd_fb_flush();
-}
 
 //void lcd_fb_public_copy_pages(const uint8_t *src, uint16_t src_stride)
 //{
@@ -909,14 +528,6 @@ void lcd_fb_public_flush(void)
 //        rt_memcpy(g_lcd_fb[page], src + page * src_stride, LCD_COLS);
 //    }
 //}
-
-static uint8_t lcd_reverse_byte(uint8_t v)
-{
-    v = (uint8_t)(((v & 0xF0U) >> 4) | ((v & 0x0FU) << 4));
-    v = (uint8_t)(((v & 0xCCU) >> 2) | ((v & 0x33U) << 2));
-    v = (uint8_t)(((v & 0xAAU) >> 1) | ((v & 0x55U) << 1));
-    return v;
-}
 
 //void lcd_fb_public_copy_pages(const uint8_t *src, uint16_t src_stride)
 //{
@@ -956,40 +567,6 @@ static uint8_t lcd_reverse_byte(uint8_t v)
 //        }
 //    }
 //}
-
-void lcd_fb_public_copy_pages(const uint8_t *src, uint16_t src_stride)
-{
-    uint8_t src_page;
-    uint16_t x;
-
-    if (src == RT_NULL) {
-        return;
-    }
-
-    for (src_page = 0; src_page < LCD_PAGES; src_page++) {
-        uint8_t dst_page = (uint8_t)(src_page ^ 3U);
-        const uint8_t *page_ptr = src + src_page * src_stride;
-
-        for (x = 0; x < LCD_COLS; x++) {
-            g_lcd_fb[dst_page][x] = lcd_reverse_byte(page_ptr[x]);
-        }
-    }
-}
-
-static uint16_t lcd_u8g2_draw_unicode_seq(u8g2_t *u8g2,
-                                          uint16_t x,
-                                          uint16_t y,
-                                          const uint16_t *codes,
-                                          uint8_t count)
-{
-    uint8_t i;
-
-    for (i = 0; i < count; i++) {
-        x += u8g2_DrawGlyph(u8g2, x, y, codes[i]);
-    }
-
-    return x;
-}
 
 static uint16_t lcd_utf8_next_codepoint(const char *s, uint16_t *consumed)
 {
@@ -1039,82 +616,6 @@ static uint16_t lcd_utf8_next_codepoint(const char *s, uint16_t *consumed)
     return '?';
 }
 
-
-
-static uint16_t lcd_u8g2_get_unicode_seq_width(u8g2_t *u8g2,
-                                               const uint16_t *codes,
-                                               uint8_t count)
-{
-    uint16_t width = 0U;
-    uint8_t i;
-
-    if ((u8g2 == RT_NULL) || (codes == RT_NULL)) {
-        return 0U;
-    }
-
-    for (i = 0U; i < count; i++) {
-        width += (uint16_t)u8g2_GetGlyphWidth(u8g2, codes[i]);
-    }
-
-    return width;
-}
-
-static void lcd_timestamp_to_local_ymdhm(uint32_t timestamp,
-                                         uint16_t *year,
-                                         uint8_t *month,
-                                         uint8_t *day,
-                                         uint8_t *hour,
-                                         uint8_t *minute)
-{
-    uint32_t local_seconds;
-    uint32_t days;
-    uint32_t secs_of_day;
-    int32_t z;
-    int32_t era;
-    uint32_t doe;
-    uint32_t yoe;
-    uint32_t doy;
-    uint32_t mp;
-    uint32_t d;
-    uint32_t m;
-    uint32_t y;
-
-    local_seconds = timestamp + 8U * 3600U;
-    days = local_seconds / 86400U;
-    secs_of_day = local_seconds % 86400U;
-
-    z = (int32_t)days + 719468;
-    era = (z >= 0 ? z : z - 146096) / 146097;
-    doe = (uint32_t)(z - era * 146097);
-    yoe = (doe - doe / 1460U + doe / 36524U - doe / 146096U) / 365U;
-    y = yoe + (uint32_t)era * 400U;
-    doy = doe - (365U * yoe + yoe / 4U - yoe / 100U);
-    mp = (5U * doy + 2U) / 153U;
-    d = doy - (153U * mp + 2U) / 5U + 1U;
-    if (mp < 10U) {
-        m = mp + 3U;
-    } else {
-        m = mp - 9U;
-        y += 1U;
-    }
-
-
-    if (year != RT_NULL) {
-        *year = (uint16_t)y;
-    }
-    if (month != RT_NULL) {
-        *month = (uint8_t)m;
-    }
-    if (day != RT_NULL) {
-        *day = (uint8_t)d;
-    }
-    if (hour != RT_NULL) {
-        *hour = (uint8_t)(secs_of_day / 3600U);
-    }
-    if (minute != RT_NULL) {
-        *minute = (uint8_t)((secs_of_day % 3600U) / 60U);
-    }
-}
 
 
 static void lcd_u8g2_draw_menu_item(u8g2_t *u8g2,
@@ -2764,51 +2265,8 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
 
 };
 
-static const lcd_page_node_t *lcd_get_page_node(lcd_page_id_t page_id)
+static void lcd_page_on_enter_prepare(lcd_page_id_t page_id)
 {
-    if (page_id >= LCD_PAGE_MAX) {
-        return RT_NULL;
-    }
-
-    return &g_lcd_pages[page_id];
-}
-
-static uint8_t lcd_page_get_depth(lcd_page_id_t page_id)
-{
-    uint8_t depth = 0U;
-
-    while ((page_id < LCD_PAGE_MAX) && (g_lcd_pages[page_id].parent_id < LCD_PAGE_MAX)) {
-        depth++;
-        page_id = g_lcd_pages[page_id].parent_id;
-    }
-
-    return depth;
-}
-
-static uint8_t lcd_page_get_select_count(lcd_page_id_t page_id)
-{
-    const lcd_page_node_t *page = lcd_get_page_node(page_id);
-
-    if (page == RT_NULL) {
-        return 0U;
-    }
-
-    if (page->select_count != 0U) {
-        return page->select_count;
-    }
-
-    return page->child_count;
-}
-
-static void lcd_page_enter(lcd_page_id_t page_id)
-{
-    if (page_id >= LCD_PAGE_MAX) {
-        return;
-    }
-
-    g_lcd_current_page_id = page_id;
-
-
     if (page_id == LCD_PAGE_SYSTEM_SETTING_HOST_PARAM_LOCAL_PHONE) {
         lcd_prepare_local_phone_page();
     }
@@ -2823,20 +2281,6 @@ static void lcd_page_enter(lcd_page_id_t page_id)
     if (page_id == LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT_NORMAL) {
         lcd_prepare_text_normal_page();
     }
-
-    g_lcd_menu_mode = (page_id != LCD_PAGE_HOME) ? RT_TRUE : RT_FALSE;
-    g_lcd_page_enter_tick = rt_tick_get();
-    g_lcd_need_redraw = RT_TRUE;
-}
-
-static void lcd_page_enter_common_ok(lcd_page_id_t return_page)
-{
-    if (return_page >= LCD_PAGE_MAX) {
-        return_page = LCD_PAGE_HOME;
-    }
-
-    g_lcd_common_ok_return_page = return_page;
-    lcd_page_enter(LCD_PAGE_COMMON_CONFIG_OK);
 }
 
 static void lcd_prepare_local_phone_page(void)
@@ -2942,256 +2386,6 @@ static void lcd_page_confirm_vehicle_plate_color(void)
         lcd_page_enter_common_ok(LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR);
     }
 }
-
-
-static void lcd_page_handle_back(void)
-{
-    const lcd_page_node_t *page = lcd_get_page_node(g_lcd_current_page_id);
-
-    if (g_lcd_current_page_id == LCD_PAGE_COMMON_CONFIG_OK) {
-        lcd_page_enter(g_lcd_common_ok_return_page);
-        return;
-    }
-
-    if (g_lcd_current_page_id == LCD_PAGE_HOME) {
-        lcd_page_enter(LCD_PAGE_MAIN_MENU);
-        return;
-    }
-
-
-    if ((page != RT_NULL) && (page->parent_id < LCD_PAGE_MAX)) {
-        lcd_page_enter(page->parent_id);
-    } else {
-        lcd_page_enter(LCD_PAGE_HOME);
-    }
-}
-
-static void lcd_page_handle_nav(int8_t delta)
-{
-    uint8_t select_count = lcd_page_get_select_count(g_lcd_current_page_id);
-    uint8_t *selected = &g_lcd_page_selected[g_lcd_current_page_id];
-
-    if (select_count == 0U) {
-        return;
-    }
-
-    if ((delta < 0) && (*selected > 0U)) {
-        (*selected)--;
-        g_lcd_need_redraw = RT_TRUE;
-    } else if ((delta > 0) && (*selected + 1U < select_count)) {
-        (*selected)++;
-        g_lcd_need_redraw = RT_TRUE;
-    }
-}
-
-static void lcd_page_handle_confirm(void)
-{
-    const lcd_page_node_t *page = lcd_get_page_node(g_lcd_current_page_id);
-    uint8_t selected_index;
-
-    if (page == RT_NULL) {
-        return;
-    }
-
-    if (page->kind == LCD_PAGE_KIND_ACTION_RESULT) {
-        if (g_lcd_current_page_id == LCD_PAGE_COMMON_CONFIG_OK) {
-            lcd_page_enter(g_lcd_common_ok_return_page);
-        } else if (page->auto_return_target < LCD_PAGE_MAX) {
-            lcd_page_enter(page->auto_return_target);
-        }
-        return;
-    }
-
-
-    if (page->on_confirm != RT_NULL) {
-        page->on_confirm();
-        return;
-    }
-
-    if ((page->kind == LCD_PAGE_KIND_LIST) &&
-        (page->children != RT_NULL) &&
-        (page->child_count > 0U)) {
-        selected_index = g_lcd_page_selected[g_lcd_current_page_id];
-        if (selected_index < page->child_count) {
-            lcd_page_enter(page->children[selected_index]);
-        }
-    }
-}
-
-static void lcd_page_handle_auto_return(void)
-{
-    const lcd_page_node_t *page = lcd_get_page_node(g_lcd_current_page_id);
-
-    if ((page == RT_NULL) || (page->auto_return_ms == 0U) || (page->auto_return_target >= LCD_PAGE_MAX)) {
-        return;
-    }
-
-    if ((rt_tick_get() - g_lcd_page_enter_tick) >= rt_tick_from_millisecond(page->auto_return_ms)) {
-        lcd_page_enter(page->auto_return_target);
-    }
-}
-
-static uint16_t lcd_vehicle_status_pack_bits(const app_vehicle_io_state_t *state)
-{
-    uint16_t bits = 0U;
-
-    bits |= (state->wk_acc  ? (1U << 0) : 0U);
-    bits |= (state->wk_on   ? (1U << 1) : 0U);
-    bits |= (state->sw_kl1  ? (1U << 2) : 0U);
-    bits |= (state->sw_kl2  ? (1U << 3) : 0U);
-    bits |= (state->sw_kl3  ? (1U << 4) : 0U);
-    bits |= (state->sw_kl4  ? (1U << 5) : 0U);
-    bits |= (state->sw_kl5  ? (1U << 6) : 0U);
-    bits |= (state->sw_kl6  ? (1U << 7) : 0U);
-    bits |= (state->sw_kl7  ? (1U << 8) : 0U);
-    bits |= (state->sw_kl8  ? (1U << 9) : 0U);
-    bits |= (state->sw_kl9  ? (1U << 10) : 0U);
-    bits |= (state->sw_kl10 ? (1U << 11) : 0U);
-
-    return bits;
-}
-
-static void lcd_page_handle_dynamic_refresh(void)
-{
-    rt_tick_t now;
-    const app_vehicle_io_state_t *state;
-    uint16_t bits;
-
-    if (g_lcd_current_page_id != LCD_PAGE_DEVICE_STATUS_VEHICLE) {
-        g_lcd_vehicle_status_last_bits = 0xFFFFU;
-        return;
-    }
-
-    now = rt_tick_get();
-    if ((now - g_lcd_vehicle_status_check_tick) < rt_tick_from_millisecond(100U)) {
-        return;
-    }
-    g_lcd_vehicle_status_check_tick = now;
-
-    state = svc_vehicle_io_get_state();
-    if (state == RT_NULL) {
-        return;
-    }
-
-    bits = lcd_vehicle_status_pack_bits(state);
-
-    if (g_lcd_vehicle_status_last_bits == 0xFFFFU) {
-        g_lcd_vehicle_status_last_bits = bits;
-        return;
-    }
-
-    if (bits != g_lcd_vehicle_status_last_bits) {
-        g_lcd_vehicle_status_last_bits = bits;
-        g_lcd_need_redraw = RT_TRUE;
-    }
-}
-
-
-static void lcd_render_current_page(void)
-{
-    const lcd_page_node_t *page = lcd_get_page_node(g_lcd_current_page_id);
-
-    if ((page != RT_NULL) && (page->render != RT_NULL)) {
-        page->render();
-    } else {
-        lcd_render_submenu_ui();
-    }
-}
-
-static rt_bool_t lcd_get_list_page_resources(lcd_page_id_t page_id,
-                                             const uint16_t *const **item_texts,
-                                             const uint8_t **item_counts,
-                                             uint8_t *item_count,
-                                             const uint16_t **title_text,
-                                             uint8_t *title_count)
-{
-    if ((item_texts == RT_NULL) || (item_counts == RT_NULL) || (item_count == RT_NULL) ||
-        (title_text == RT_NULL) || (title_count == RT_NULL)) {
-        return RT_FALSE;
-    }
-
-    switch (page_id) {
-    case LCD_PAGE_DRIVE_RECORD_MENU:
-        *item_texts = g_drive_sub_item_texts_u8g2;
-        *item_counts = g_drive_sub_item_counts_u8g2;
-        *item_count = 9U;
-        *title_text = g_menu_item_text_1;
-        *title_count = 4U;
-        return RT_TRUE;
-
-    case LCD_PAGE_DEVICE_STATUS_MENU:
-        *item_texts = g_device_sub_item_texts_u8g2;
-        *item_counts = g_device_sub_item_counts_u8g2;
-        *item_count = 9U;
-        *title_text = g_menu_item_text_2;
-        *title_count = 4U;
-        return RT_TRUE;
-
-    case LCD_PAGE_SYSTEM_SETTING_MENU:
-        *item_texts = g_system_sub_item_texts_u8g2;
-        *item_counts = g_system_sub_item_counts_u8g2;
-        *item_count = 9U;
-        *title_text = g_menu_item_text_3;
-        *title_count = 4U;
-        return RT_TRUE;
-
-    case LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO:
-        *item_texts = g_vehicle_info_setting_item_texts_u8g2;
-        *item_counts = g_vehicle_info_setting_item_counts_u8g2;
-        *item_count = 6U;
-        *title_text = g_system_sub_item_3;   /* 车辆信息设置 */
-        *title_count = 6U;
-        return RT_TRUE;
-
-    case LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_COLOR:
-        *item_texts = g_vehicle_plate_color_item_texts_u8g2;
-        *item_counts = g_vehicle_plate_color_item_counts_u8g2;
-        *item_count = 5U;
-        *title_text = g_vehicle_info_setting_item_3;   /* 车牌颜色 */
-        *title_count = 4U;
-        return RT_TRUE;
-
-
-    case LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_CLASS:
-            *item_texts = g_vehicle_plate_class_item_texts_u8g2;
-            *item_counts = g_vehicle_plate_class_item_counts_u8g2;
-            *item_count = 5U;
-            *title_text = g_vehicle_info_setting_item_4;   /* 车牌分类 */
-            *title_count = 4U;
-            return RT_TRUE;
-
-    case LCD_PAGE_DRIVE_RECORD_INFO_CENTER:
-        *item_texts = g_info_center_item_texts_u8g2;
-        *item_counts = g_info_center_item_counts_u8g2;
-        *item_count = 4U;
-        *title_text = g_drive_sub_item_8;   /* 信息中心 */
-        *title_count = 4U;
-        return RT_TRUE;
-
-    case LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT:
-        *item_texts = g_info_text_item_texts_u8g2;
-        *item_counts = g_info_text_item_counts_u8g2;
-        *item_count = 4U;
-        *title_text = g_info_center_item_1; /* 文本信息 */
-        *title_count = 4U;
-        return RT_TRUE;
-
-    case LCD_PAGE_SYSTEM_SETTING_HOST_PARAM:
-        *item_texts = g_host_param_item_texts_u8g2;
-        *item_counts = g_host_param_item_counts_u8g2;
-        *item_count = 4U;
-        *title_text = g_system_sub_item_4;   /* 主机参数设置 */
-        *title_count = 6U;
-        return RT_TRUE;
-
-
-    default:
-        break;
-    }
-
-    return RT_FALSE;
-}
-
 
 
 static rt_bool_t lcd_home_ui_set_data(uint16_t speed_kmh_x10,
@@ -3570,18 +2764,6 @@ void svc_lcd_update_total_mileage(uint32_t odo_km, uint16_t odo_rem_m)
         }
     }
 }
-
-
-static void lcd_fb_flush(void)
-{
-    for (uint8_t page = 0; page < LCD_PAGES; page++) {
-        lcd_set_page_col(page, 0);
-        lcd_write_data_buf(g_lcd_fb[page], LCD_COLS);
-    }
-}
-
-
-
 static void lcd_u8g2_draw_bitmap12x12(u8g2_t *u8g2,
                                       uint8_t x,
                                       uint8_t y,
@@ -3923,38 +3105,15 @@ static void lcd_render_boot_check_ui(void)
 
 
 
-static void st7567_init_seq(void)
-{
-    rt_thread_mdelay(10);
-    lcd_reset();
-
-    lcd_write_cmd(ST7567_CMD_BIAS_1_9);
-    lcd_write_cmd(ST7567_CMD_SEG_NORMAL);
-    lcd_write_cmd(ST7567_CMD_COM_NORMAL);
-    lcd_write_cmd(ST7567_CMD_SET_START_LINE | 0x00);
-    lcd_write_cmd(ST7567_CMD_REG_RATIO | ST7567_INIT_REG_RATIO);
-    lcd_write_cmd(ST7567_CMD_SET_EV);
-    lcd_write_cmd(ST7567_INIT_EV);
-    lcd_write_cmd(ST7567_CMD_SET_BOOSTER);
-    lcd_write_cmd(ST7567_CMD_BOOSTER_X5);
-    lcd_write_cmd(ST7567_CMD_POWER_ALL_ON);
-    rt_thread_mdelay(120);
-    lcd_write_cmd(ST7567_CMD_INVERSE_OFF);
-    lcd_write_cmd(ST7567_CMD_ALL_PIXEL_OFF);
-    lcd_clear();
-    lcd_write_cmd(ST7567_CMD_DISPLAY_ON);
-}
-
 int svc_lcd_init(void)
 {
-    svc_lcd_ctrl_pins_init();
-    svc_lcd_spi_hw_init();
-
-    lcd_csn_set(RT_FALSE);
-    lcd_a0_set(RT_TRUE);
-    lcd_backlight_off();
-
-    st7567_init_seq();
+    lcd_drv_init();
+    lcd_ui_data_reset();
+    lcd_ui_list_register(g_lcd_list_resources,
+                         (uint8_t)(sizeof(g_lcd_list_resources) / sizeof(g_lcd_list_resources[0])));
+    lcd_ui_pages_register(g_lcd_pages, LCD_PAGE_MAX);
+    lcd_ui_nav_set_enter_hook(lcd_page_on_enter_prepare);
+    lcd_ui_render_set_fallback(lcd_render_submenu_ui);
     u8g2_port_init();
     APP_NON_CAN_LOG("LCD ST7567 init done\r\n");
     return RT_EOK;
@@ -3967,11 +3126,7 @@ static void svc_lcd_thread_entry(void *arg)
 
     lcd_backlight_on();
 
-    g_lcd_menu_mode = RT_FALSE;
-    rt_memset(g_lcd_page_selected, 0, sizeof(g_lcd_page_selected));
-    g_lcd_current_page_id = LCD_PAGE_HOME;
-    g_lcd_page_enter_tick = 0U;
-    g_lcd_need_redraw = RT_TRUE;
+    lcd_ui_core_reset();
 
     APP_NON_CAN_LOG("LCD: ui thread start\r\n");
 
