@@ -9,6 +9,8 @@
 #include "LCD/lcd_drv.h"
 #include "LCD/lcd_graphics.h"
 #include "LCD/lcd_ui.h"
+#include <string.h>
+
 
 #define LCD_COLS                    132
 #define LCD_PAGES                   8
@@ -23,6 +25,23 @@
 #define LCD_FONT_CN_12          u8g2_font_wqy12_t_gb2312
 
 
+#define LCD_PLATE_FOCUS_PROVINCE  0U
+#define LCD_PLATE_FOCUS_LETTER    1U
+#define LCD_PLATE_FOCUS_DIGIT0    2U
+#define LCD_PLATE_FOCUS_DIGIT1    3U
+#define LCD_PLATE_FOCUS_DIGIT2    4U
+#define LCD_PLATE_FOCUS_DIGIT3    5U
+#define LCD_PLATE_FOCUS_DIGIT4    6U
+#define LCD_PLATE_FOCUS_CONFIRM   7U
+#define LCD_PLATE_FOCUS_EXIT      8U
+#define LCD_PLATE_FOCUS_MAX       LCD_PLATE_FOCUS_EXIT
+
+static uint8_t g_lcd_plate_dirty = 0U;
+static uint8_t g_lcd_plate_focus = LCD_PLATE_FOCUS_PROVINCE;
+static uint8_t g_lcd_plate_valid = 0U;
+static uint8_t g_lcd_plate_province_index = 0U;
+static uint8_t g_lcd_plate_letter_index = 0U;
+static uint8_t g_lcd_plate_digits[5] = {0U};
 
 
 
@@ -370,6 +389,45 @@ static const uint8_t g_vehicle_plate_color_item_counts_u8g2[] = {
     2, 2, 2, 2, 2
 };
 
+static const uint16_t g_lcd_plate_province_codes[] = {
+    0x4EAC, /* 京 */
+    0x6D25, /* 津 */
+    0x6CAA, /* 沪 */
+    0x6E1D, /* 渝 */
+    0x5180, /* 冀 */
+    0x8C6B, /* 豫 */
+    0x4E91, /* 云 */
+    0x8FBD, /* 辽 */
+    0x9ED1, /* 黑 */
+    0x6E58, /* 湘 */
+    0x7696, /* 皖 */
+    0x9C81, /* 鲁 */
+    0x65B0, /* 新 */
+    0x82CF, /* 苏 */
+    0x6D59, /* 浙 */
+    0x8D63, /* 赣 */
+    0x9102, /* 鄂 */
+    0x6842, /* 桂 */
+    0x7518, /* 甘 */
+    0x664B, /* 晋 */
+    0x8499, /* 蒙 */
+    0x9655, /* 陕 */
+    0x5409, /* 吉 */
+    0x95FD, /* 闽 */
+    0x8D35, /* 贵 */
+    0x7CA4, /* 粤 */
+    0x9752, /* 青 */
+    0x85CF, /* 藏 */
+    0x5DDD, /* 川 */
+    0x5B81, /* 宁 */
+    0x743C  /* 琼 */
+};
+
+
+static const char g_lcd_plate_letters[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+static const char g_lcd_plate_tail_chars[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+
 static const lcd_ui_list_resource_t g_lcd_list_resources[] = {
     {
         LCD_PAGE_DRIVE_RECORD_MENU,
@@ -507,6 +565,22 @@ static void lcd_page_confirm_brightness_level(void);
 static void lcd_render_local_phone_ui(void);
 static void lcd_prepare_local_phone_page(void);
 static rt_bool_t lcd_handle_local_phone_keys(void);
+static void lcd_render_plate_set_ui(void);
+static void lcd_prepare_plate_set_page(void);
+static rt_bool_t lcd_handle_plate_set_keys(void);
+static void lcd_plate_draw_ascii_cell(u8g2_t *u8g2,
+                                      uint8_t x,
+                                      uint8_t y,
+                                      char ch,
+                                      rt_bool_t selected);
+static void lcd_plate_draw_top_line(u8g2_t *u8g2);
+static void lcd_plate_draw_ascii_option(u8g2_t *u8g2,
+                                        uint8_t x,
+                                        uint8_t y,
+                                        char ch,
+                                        rt_bool_t selected);
+static void lcd_plate_save_and_ok(void);
+
 
 //void lcd_fb_public_copy_pages(const uint8_t *src, uint16_t src_stride)
 //{
@@ -922,6 +996,8 @@ static void lcd_render_submenu_ui(void)
     u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
     u8g2_DrawStr(u8g2, 18, 24, "SUBMENU");
     u8g2_DrawStr(u8g2, 18, 40, level_str);
+
+
 
     u8g2_port_flush_buffer();
 }
@@ -2118,7 +2194,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         0U,
         0U,
         RT_FALSE,
-        lcd_render_submenu_ui,
+        lcd_render_plate_set_ui,
         RT_NULL,
         0U,
         LCD_PAGE_MAX
@@ -2273,6 +2349,10 @@ static void lcd_page_on_enter_prepare(lcd_page_id_t page_id)
     if (page_id == LCD_PAGE_DRIVE_RECORD_INFO_CENTER_TEXT_NORMAL) {
         lcd_prepare_text_normal_page();
     }
+    if (page_id == LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_SET) {
+        lcd_prepare_plate_set_page();
+    }
+
 }
 
 static void lcd_prepare_local_phone_page(void)
@@ -3184,6 +3264,20 @@ static void svc_lcd_thread_entry(void *arg)
             continue;
         }
 
+        if (lcd_handle_plate_set_keys() == RT_TRUE) {
+            lcd_page_handle_auto_return();
+            lcd_page_handle_dynamic_refresh();
+
+            if (g_lcd_need_redraw == RT_TRUE) {
+                lcd_render_current_page();
+                g_lcd_need_redraw = RT_FALSE;
+            }
+
+            rt_thread_mdelay(10);
+            continue;
+        }
+
+
         if (lcd_handle_local_phone_keys() == RT_TRUE) {
             lcd_page_handle_auto_return();
             lcd_page_handle_dynamic_refresh();
@@ -3486,6 +3580,394 @@ static void lcd_render_local_phone_ui(void)
 
     u8g2_port_flush_buffer();
 }
+
+static void lcd_plate_draw_ascii_cell(u8g2_t *u8g2,
+                                      uint8_t x,
+                                      uint8_t y,
+                                      char ch,
+                                      rt_bool_t selected)
+{
+    char s[2];
+
+    if (selected == RT_TRUE) {
+        u8g2_DrawBox(u8g2, (uint8_t)(x - 1U), (uint8_t)(y - 10U), 8U, 12U);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+
+    s[0] = ch;
+    s[1] = '\0';
+    u8g2_DrawStr(u8g2, x, y, s);
+
+    u8g2_SetDrawColor(u8g2, 1);
+}
+
+static void lcd_plate_draw_top_line(u8g2_t *u8g2)
+{
+    uint8_t i;
+    static const uint8_t digit_x[5] = {34U, 42U, 50U, 58U, 66U};
+
+    if ((g_lcd_plate_valid == 0U) && (g_lcd_plate_dirty == 0U)) {
+        u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+        u8g2_DrawStr(u8g2, 2, 12, "_ _._ _ _ _ _");
+        return;
+    }
+
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+    if (g_lcd_plate_focus == LCD_PLATE_FOCUS_PROVINCE) {
+        u8g2_DrawBox(u8g2, 1U, 1U, 14U, 14U);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    u8g2_DrawGlyph(u8g2, 2U, 12U, g_lcd_plate_province_codes[g_lcd_plate_province_index]);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+    lcd_plate_draw_ascii_cell(u8g2,
+                              18U,
+                              12U,
+                              g_lcd_plate_letters[g_lcd_plate_letter_index],
+                              (g_lcd_plate_focus == LCD_PLATE_FOCUS_LETTER) ? RT_TRUE : RT_FALSE);
+
+    u8g2_DrawStr(u8g2, 26U, 12U, ".");
+
+    for (i = 0U; i < 5U; i++) {
+        lcd_plate_draw_ascii_cell(u8g2,
+                                  digit_x[i],
+                                  12U,
+                                  g_lcd_plate_tail_chars[g_lcd_plate_digits[i]],
+                                  (g_lcd_plate_focus == (LCD_PLATE_FOCUS_DIGIT0 + i)) ? RT_TRUE : RT_FALSE);
+    }
+}
+
+
+static void lcd_plate_draw_ascii_option(u8g2_t *u8g2,
+                                        uint8_t x,
+                                        uint8_t y,
+                                        char ch,
+                                        rt_bool_t selected)
+{
+    char s[2];
+
+    if (selected == RT_TRUE) {
+        u8g2_DrawBox(u8g2, (uint8_t)(x - 1U), (uint8_t)(y - 10U), 9U, 12U);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+
+    s[0] = ch;
+    s[1] = '\0';
+    u8g2_DrawStr(u8g2, x, y, s);
+
+    u8g2_SetDrawColor(u8g2, 1);
+}
+
+static void lcd_plate_save_and_ok(void)
+{
+    svc_storage_plate_number_t plate;
+    uint8_t i;
+
+    plate.valid = 1U;
+    plate.province_index = g_lcd_plate_province_index;
+    plate.letter = g_lcd_plate_letters[g_lcd_plate_letter_index];
+
+    for (i = 0U; i < 5U; i++) {
+        plate.digits[i] = g_lcd_plate_tail_chars[g_lcd_plate_digits[i]];
+    }
+    plate.digits[5] = '\0';
+
+    if (svc_storage_save_plate_number(&plate) == RT_TRUE) {
+        g_lcd_plate_valid = 1U;
+        g_lcd_plate_dirty = 0U;
+        lcd_page_enter_common_ok(LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_SET);
+    }
+}
+
+
+static void lcd_prepare_plate_set_page(void)
+{
+    svc_storage_plate_number_t plate;
+    uint8_t i;
+       const char *p;
+
+    g_lcd_plate_focus = LCD_PLATE_FOCUS_PROVINCE;
+    g_lcd_plate_dirty = 0U;
+
+    if ((svc_storage_load_plate_number(&plate) == RT_TRUE) &&
+        (plate.valid == 1U) &&
+        (plate.province_index < (sizeof(g_lcd_plate_province_codes) / sizeof(g_lcd_plate_province_codes[0]))) &&
+        (plate.letter >= 'A') &&
+        (plate.letter <= 'Z')) {
+        g_lcd_plate_valid = 1U;
+        g_lcd_plate_province_index = plate.province_index;
+        g_lcd_plate_letter_index = (uint8_t)(plate.letter - 'A');
+
+        for (i = 0U; i < 5U; i++) {
+
+            p = strchr(g_lcd_plate_tail_chars, plate.digits[i]);
+            if (p != RT_NULL) {
+                g_lcd_plate_digits[i] = (uint8_t)(p - g_lcd_plate_tail_chars);
+            } else {
+                g_lcd_plate_digits[i] = 0U;
+            }
+
+        }
+    } else {
+        g_lcd_plate_valid = 0U;
+        g_lcd_plate_province_index = 0U;
+        g_lcd_plate_letter_index = 0U;
+
+        for (i = 0U; i < 5U; i++) {
+            g_lcd_plate_digits[i] = 0U;
+        }
+    }
+}
+
+static void lcd_render_plate_set_ui(void)
+{
+    u8g2_t *u8g2;
+    uint8_t i;
+    uint8_t x;
+    uint8_t selected_digit = 0U;
+    uint8_t letter_start;
+    static const uint16_t g_confirm_text[] = {0x786E, 0x8BA4}; /* 确认 */
+    static const uint16_t g_exit_text[] = {0x9000, 0x51FA};    /* 退出 */
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    lcd_plate_draw_top_line(u8g2);
+
+    u8g2_DrawFrame(u8g2, 2, 18, 128, 28);
+
+    if (g_lcd_plate_focus == LCD_PLATE_FOCUS_PROVINCE) {
+        uint8_t province_count;
+        uint8_t province_start;
+
+        province_count = (uint8_t)(sizeof(g_lcd_plate_province_codes) / sizeof(g_lcd_plate_province_codes[0]));
+        u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+
+        if (g_lcd_plate_province_index < 2U) {
+            province_start = 0U;
+        } else if (g_lcd_plate_province_index >= (uint8_t)(province_count - 2U)) {
+            province_start = (uint8_t)(province_count - 4U);
+        } else {
+            province_start = (uint8_t)(g_lcd_plate_province_index - 1U);
+        }
+
+        for (i = 0U; i < 4U; i++) {
+            uint8_t province_index = (uint8_t)(province_start + i);
+
+            x = (uint8_t)(14U + i * 28U);
+            if (province_index == g_lcd_plate_province_index) {
+                u8g2_DrawBox(u8g2, (uint8_t)(x - 3U), 24U, 18U, 16U);
+                u8g2_SetDrawColor(u8g2, 0);
+            }
+
+            u8g2_DrawGlyph(u8g2, x, 37, g_lcd_plate_province_codes[province_index]);
+            u8g2_SetDrawColor(u8g2, 1);
+        }
+    } else if (g_lcd_plate_focus == LCD_PLATE_FOCUS_LETTER) {
+        u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+
+        if (g_lcd_plate_letter_index < 3U) {
+            letter_start = 0U;
+        } else if (g_lcd_plate_letter_index > 22U) {
+            letter_start = 20U;
+        } else {
+            letter_start = (uint8_t)(g_lcd_plate_letter_index - 3U);
+        }
+
+        for (i = 0U; i < 6U; i++) {
+            uint8_t letter_index = (uint8_t)(letter_start + i);
+
+            x = (uint8_t)(12U + i * 18U);
+            lcd_plate_draw_ascii_option(u8g2,
+                                        x,
+                                        36U,
+                                        g_lcd_plate_letters[letter_index],
+                                        (letter_index == g_lcd_plate_letter_index) ? RT_TRUE : RT_FALSE);
+        }
+
+
+    } else if ((g_lcd_plate_focus >= LCD_PLATE_FOCUS_DIGIT0) &&
+               (g_lcd_plate_focus <= LCD_PLATE_FOCUS_DIGIT4)) {
+        uint8_t tail_start;
+        uint8_t tail_index;
+
+        u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+        selected_digit = g_lcd_plate_digits[g_lcd_plate_focus - LCD_PLATE_FOCUS_DIGIT0];
+
+        if (selected_digit < 4U) {
+            tail_start = 0U;
+        } else if (selected_digit > 31U) {
+            tail_start = 27U;
+        } else {
+            tail_start = (uint8_t)(selected_digit - 4U);
+        }
+
+        for (i = 0U; i < 9U; i++) {
+            tail_index = (uint8_t)(tail_start + i);
+            x = (uint8_t)(6U + i * 14U);
+
+            lcd_plate_draw_ascii_option(u8g2,
+                                        x,
+                                        30U,
+                                        g_lcd_plate_tail_chars[tail_index],
+                                        (tail_index == selected_digit) ? RT_TRUE : RT_FALSE);
+        }
+
+        for (i = 0U; i < 9U; i++) {
+            tail_index = (uint8_t)(tail_start + 9U + i);
+            if (tail_index >= 36U) {
+                break;
+            }
+
+            x = (uint8_t)(6U + i * 14U);
+            lcd_plate_draw_ascii_option(u8g2,
+                                        x,
+                                        42U,
+                                        g_lcd_plate_tail_chars[tail_index],
+                                        (tail_index == selected_digit) ? RT_TRUE : RT_FALSE);
+        }
+    }
+
+
+
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+
+    if (g_lcd_plate_focus == LCD_PLATE_FOCUS_CONFIRM) {
+        u8g2_DrawBox(u8g2, 0, 49, 34, 14);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 60, g_confirm_text, 2);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    if (g_lcd_plate_focus == LCD_PLATE_FOCUS_EXIT) {
+        u8g2_DrawBox(u8g2, 96, 49, 34, 14);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 104, 60, g_exit_text, 2);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    u8g2_port_flush_buffer();
+}
+
+
+static rt_bool_t lcd_handle_plate_set_keys(void)
+{
+    uint8_t digit_index;
+
+    if (g_lcd_current_page_id != LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_SET) {
+        return RT_FALSE;
+    }
+
+    if (svc_adc_consume_s1_event() == RT_TRUE) {
+        if (g_lcd_plate_focus < LCD_PLATE_FOCUS_MAX) {
+            g_lcd_plate_focus++;
+        } else {
+            g_lcd_plate_focus = LCD_PLATE_FOCUS_PROVINCE;
+        }
+
+        g_lcd_need_redraw = RT_TRUE;
+        return RT_TRUE;
+    }
+
+    if (svc_adc_consume_s2_event() == RT_TRUE) {
+        if (g_lcd_plate_focus == LCD_PLATE_FOCUS_PROVINCE) {
+            if (g_lcd_plate_province_index > 0U) {
+                g_lcd_plate_province_index--;
+            } else {
+                g_lcd_plate_province_index =
+                    (uint8_t)((sizeof(g_lcd_plate_province_codes) / sizeof(g_lcd_plate_province_codes[0])) - 1U);
+            }
+            g_lcd_plate_dirty = 1U;
+        } else if (g_lcd_plate_focus == LCD_PLATE_FOCUS_LETTER) {
+            if (g_lcd_plate_letter_index > 0U) {
+                g_lcd_plate_letter_index--;
+            } else {
+                g_lcd_plate_letter_index = 25U;
+            }
+            g_lcd_plate_dirty = 1U;
+        } else if ((g_lcd_plate_focus >= LCD_PLATE_FOCUS_DIGIT0) &&
+                   (g_lcd_plate_focus <= LCD_PLATE_FOCUS_DIGIT4)) {
+            digit_index = (uint8_t)(g_lcd_plate_focus - LCD_PLATE_FOCUS_DIGIT0);
+
+            if (g_lcd_plate_digits[digit_index] > 0U) {
+                g_lcd_plate_digits[digit_index]--;
+            } else {
+                g_lcd_plate_digits[digit_index] = 35U;
+            }
+
+            g_lcd_plate_dirty = 1U;
+        } else if (g_lcd_plate_focus == LCD_PLATE_FOCUS_CONFIRM) {
+            g_lcd_plate_focus = LCD_PLATE_FOCUS_EXIT;
+        } else {
+            g_lcd_plate_focus = LCD_PLATE_FOCUS_CONFIRM;
+        }
+
+        g_lcd_need_redraw = RT_TRUE;
+        return RT_TRUE;
+    }
+
+    if (svc_adc_consume_s3_event() == RT_TRUE) {
+        if (g_lcd_plate_focus == LCD_PLATE_FOCUS_PROVINCE) {
+            g_lcd_plate_province_index++;
+            if (g_lcd_plate_province_index >=
+                (sizeof(g_lcd_plate_province_codes) / sizeof(g_lcd_plate_province_codes[0]))) {
+                g_lcd_plate_province_index = 0U;
+            }
+            g_lcd_plate_dirty = 1U;
+        } else if (g_lcd_plate_focus == LCD_PLATE_FOCUS_LETTER) {
+            if (g_lcd_plate_letter_index < 25U) {
+                g_lcd_plate_letter_index++;
+            } else {
+                g_lcd_plate_letter_index = 0U;
+            }
+            g_lcd_plate_dirty = 1U;
+        } else if ((g_lcd_plate_focus >= LCD_PLATE_FOCUS_DIGIT0) &&
+                   (g_lcd_plate_focus <= LCD_PLATE_FOCUS_DIGIT4)) {
+            digit_index = (uint8_t)(g_lcd_plate_focus - LCD_PLATE_FOCUS_DIGIT0);
+
+            if (g_lcd_plate_digits[digit_index] < 35U) {
+                g_lcd_plate_digits[digit_index]++;
+            } else {
+                g_lcd_plate_digits[digit_index] = 0U;
+            }
+
+            g_lcd_plate_dirty = 1U;
+        } else if (g_lcd_plate_focus == LCD_PLATE_FOCUS_CONFIRM) {
+            g_lcd_plate_focus = LCD_PLATE_FOCUS_EXIT;
+        } else {
+            g_lcd_plate_focus = LCD_PLATE_FOCUS_CONFIRM;
+        }
+
+        g_lcd_need_redraw = RT_TRUE;
+        return RT_TRUE;
+    }
+
+    if (svc_adc_consume_s4_event() == RT_TRUE) {
+        if (g_lcd_plate_focus == LCD_PLATE_FOCUS_CONFIRM) {
+            lcd_plate_save_and_ok();
+            return RT_TRUE;
+        }
+
+        if (g_lcd_plate_focus == LCD_PLATE_FOCUS_EXIT) {
+            lcd_page_enter(LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO);
+            return RT_TRUE;
+        }
+
+        g_lcd_need_redraw = RT_TRUE;
+        return RT_TRUE;
+    }
+
+    return RT_FALSE;
+}
+
+
 
 static rt_bool_t lcd_handle_local_phone_keys(void)
 {

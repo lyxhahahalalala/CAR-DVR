@@ -17,6 +17,7 @@ int app_framework_init(void)
     app_init_led_pins();
 
     /* 服务初始化先集中收口到这里。 */
+
     svc_led_init();
     svc_adc_init();
     svc_lcd_init();

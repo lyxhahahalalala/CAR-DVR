@@ -16,7 +16,7 @@
 
 #define SVC_STORAGE_CONFIG_ADDR          0x0040U
 #define SVC_STORAGE_CONFIG_MAGIC         0x434F4E46UL /* CONF */
-#define SVC_STORAGE_CONFIG_VERSION       1U
+#define SVC_STORAGE_CONFIG_VERSION       2U
 
 
 typedef struct
@@ -38,9 +38,11 @@ typedef struct
     char local_phone[12];
     uint8_t plate_class;
     uint8_t plate_color;
+    svc_storage_plate_number_t plate_number;
     uint8_t reserved[2];
     uint32_t checksum;
 } svc_storage_config_record_t;
+
 
 
 
@@ -55,8 +57,15 @@ static svc_storage_mileage_t g_storage_mileage_shadow = {
 static const svc_storage_config_t g_default_config = {
     .local_phone = "00000000000",
     .plate_class = 1U,
-    .plate_color = 1U
+    .plate_color = 1U,
+    .plate_number = {
+        .valid = 0U,
+        .province_index = 0U,
+        .letter = 'A',
+        .digits = "00000"
+    }
 };
+
 
 static uint32_t svc_storage_checksum(const uint8_t *data, uint16_t len)
 {
@@ -224,6 +233,39 @@ static rt_bool_t svc_storage_plate_color_valid(uint8_t plate_color)
     return ((plate_color >= 1U) && (plate_color <= 5U)) ? RT_TRUE : RT_FALSE;
 }
 
+static rt_bool_t svc_storage_plate_number_valid(const svc_storage_plate_number_t *plate_number)
+{
+    uint8_t i;
+
+    if (plate_number == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if (plate_number->valid > 1U) {
+        return RT_FALSE;
+    }
+
+    if (plate_number->province_index >= SVC_STORAGE_PLATE_PROVINCE_COUNT) {
+        return RT_FALSE;
+    }
+
+    if ((plate_number->letter < 'A') || (plate_number->letter > 'Z')) {
+        return RT_FALSE;
+    }
+
+    for (i = 0U; i < 5U; i++) {
+        char ch = plate_number->digits[i];
+
+        if (!((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z'))) {
+            return RT_FALSE;
+        }
+    }
+
+
+    return (plate_number->digits[5] == '\0') ? RT_TRUE : RT_FALSE;
+}
+
+
 static rt_bool_t svc_storage_config_record_is_valid(const svc_storage_config_record_t *record)
 {
     uint32_t checksum;
@@ -247,6 +289,9 @@ static rt_bool_t svc_storage_config_record_is_valid(const svc_storage_config_rec
     }
 
     if (svc_storage_plate_color_valid(record->plate_color) != RT_TRUE) {
+        return RT_FALSE;
+    }
+    if (svc_storage_plate_number_valid(&record->plate_number) != RT_TRUE) {
         return RT_FALSE;
     }
 
@@ -409,6 +454,7 @@ rt_bool_t svc_storage_load_config(svc_storage_config_t *config)
     rt_memcpy(config->local_phone, record.local_phone, sizeof(config->local_phone));
     config->plate_class = record.plate_class;
     config->plate_color = record.plate_color;
+    config->plate_number = record.plate_number;
 
     APP_NON_CAN_LOG("EEPROM: load config phone=%s class=%u color=%u\r\n",
                     config->local_phone,
@@ -425,9 +471,11 @@ rt_bool_t svc_storage_save_config(const svc_storage_config_t *config)
     if ((config == RT_NULL) ||
         (svc_storage_phone_digits_valid(config->local_phone) != RT_TRUE) ||
         (svc_storage_plate_class_valid(config->plate_class) != RT_TRUE) ||
-        (svc_storage_plate_color_valid(config->plate_color) != RT_TRUE)) {
+        (svc_storage_plate_color_valid(config->plate_color) != RT_TRUE) ||
+        (svc_storage_plate_number_valid(&config->plate_number) != RT_TRUE)) {
         return RT_FALSE;
     }
+
 
     if (g_eeprom_i2c_bus == RT_NULL) {
         APP_NON_CAN_LOG("EEPROM: save config failed, bus null\r\n");
@@ -441,6 +489,8 @@ rt_bool_t svc_storage_save_config(const svc_storage_config_t *config)
     rt_memcpy(record.local_phone, config->local_phone, sizeof(record.local_phone));
     record.plate_class = config->plate_class;
     record.plate_color = config->plate_color;
+    record.plate_number = config->plate_number;
+
     record.checksum = svc_storage_checksum((const uint8_t *)&record,
                                            (uint16_t)(sizeof(record) - sizeof(uint32_t)));
 
@@ -564,4 +614,31 @@ rt_bool_t svc_storage_save_plate_color(const svc_storage_plate_color_t *plate_co
     return svc_storage_save_config(&config);
 }
 
+rt_bool_t svc_storage_load_plate_number(svc_storage_plate_number_t *plate_number)
+{
+    svc_storage_config_t config;
+    rt_bool_t result;
+
+    if (plate_number == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    result = svc_storage_load_config(&config);
+    *plate_number = config.plate_number;
+    return result;
+}
+
+rt_bool_t svc_storage_save_plate_number(const svc_storage_plate_number_t *plate_number)
+{
+    svc_storage_config_t config;
+
+    if (svc_storage_plate_number_valid(plate_number) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    (void)svc_storage_load_config(&config);
+    config.plate_number = *plate_number;
+
+    return svc_storage_save_config(&config);
+}
 
