@@ -1,3 +1,34 @@
+/*
+ * ============================================================
+ *  svc_lcd.c — LCD 服务层 (最大的模块, ~4000 行)
+ * ============================================================
+ *
+ * 功能概述:
+ *   这是整个工程中最大的源文件, 实现了 LCD 显示的所有业务逻辑。
+ *   它协调了三个子层 (lcd_drv → lcd_graphics → lcd_ui) 的配合,
+ *   同时作为对外接口提供给其他模块更新显示数据。
+ *
+ * 本文件包含:
+ *   1) 菜单文本数据 (所有中英文菜单的 Unicode 码点数组)
+ *   2) 页面定义 (lcd_page_node_t 树形结构)
+ *   3) 渲染函数 (主页、菜单列表、设置项等)
+ *   4) 按键处理 (方向键、确认键、数字键盘编辑)
+ *   5) 服务层接口 (svc_lcd_init, svc_lcd_task_start 等)
+ *   6) 数据更新接口 (svc_lcd_update_xxx 系列)
+ *
+ * 为什么这么大?
+ *   嵌入式项目中, LCD 显示通常是最"重"的模块, 因为:
+ *   - 所有菜单文本都编译在代码中 (ROM 存储, 不占 RAM)
+ *   - 每个页面有自己的渲染逻辑
+ *   - 中文菜单文本以 Unicode 码点形式存储 (每个汉字 2 字节)
+ *   如果未来需要缩减文件大小, 可以将菜单数据分离到 .c 数据文件
+ *
+ * 分层架构:
+ *   svc_lcd          (服务层) ← 本文件, 协调各层
+ *     ├── lcd_ui    (UI 层)  ← 页面导航、菜单管理
+ *     ├── lcd_graphics (图形层) ← 帧缓冲管理
+ *     └── lcd_drv   (驱动层) ← ST7567 硬件操作
+ */
 #include <rtthread.h>
 
 #include "app_config.h"
@@ -11,20 +42,39 @@
 #include "LCD/lcd_ui.h"
 #include <string.h>
 
+/* ---- 硬件参数 ---- */
+#define LCD_COLS                    132     /* ST7567 列数 */
+#define LCD_PAGES                   8       /* 页数 (64 行 / 8) */
+#define LCD_ROWS                    64      /* 总行数 */
 
-#define LCD_COLS                    132
-#define LCD_PAGES                   8
-#define LCD_ROWS                    64
-
+/* ---- UI 边距 ---- */
 #define LCD_UI_MARGIN_LEFT          6
 #define LCD_UI_MARGIN_RIGHT         6
 #define LCD_UI_MARGIN_TOP           4
 #define LCD_UI_MARGIN_BOTTOM        4
-/* Active LCD UI fonts */
+
+/* ---- 字体选择 ---- */
+/*
+ * LCD_FONT_ASCII_SMALL: 6x10 等宽 ASCII 字体
+ * LCD_FONT_CN_12: 12x12 中文字体 (文泉驿, GB2312 编码)
+ * 这两个字体来自 u8g2 图形库, 在 u8g2_port.c 中注册
+ */
 #define LCD_FONT_ASCII_SMALL    u8g2_font_6x10_tf
 #define LCD_FONT_CN_12          u8g2_font_wqy12_t_gb2312
 
 
+/*
+ * ---- 车牌编辑焦点状态 ----
+ *
+ * 车牌编辑界面中, 焦点可以在以下位置切换:
+ *   PROVINCE: 省份简称 (京/沪/湘/粤...)
+ *   LETTER:   字母 (A~Z)
+ *   DIGIT0~4: 5 位数字/字母
+ *   CONFIRM:  确认按钮
+ *   EXIT:     退出按钮
+ *
+ * 用户通过 S2/S3 切换焦点, S1/S4 修改值
+ */
 #define LCD_PLATE_FOCUS_PROVINCE  0U
 #define LCD_PLATE_FOCUS_LETTER    1U
 #define LCD_PLATE_FOCUS_DIGIT0    2U
@@ -36,17 +86,19 @@
 #define LCD_PLATE_FOCUS_EXIT      8U
 #define LCD_PLATE_FOCUS_MAX       LCD_PLATE_FOCUS_EXIT
 
-static uint8_t g_lcd_plate_dirty = 0U;
-static uint8_t g_lcd_plate_focus = LCD_PLATE_FOCUS_PROVINCE;
-static uint8_t g_lcd_plate_valid = 0U;
-static uint8_t g_lcd_plate_province_index = 0U;
-static uint8_t g_lcd_plate_letter_index = 0U;
-static uint8_t g_lcd_plate_digits[5] = {0U};
+/* 车牌编辑状态全局变量 */
+static uint8_t g_lcd_plate_dirty = 0U;              /* 车牌数据是否被修改过 */
+static uint8_t g_lcd_plate_focus = LCD_PLATE_FOCUS_PROVINCE; /* 当前焦点位置 */
+static uint8_t g_lcd_plate_valid = 0U;              /* 车牌是否有效 */
+static uint8_t g_lcd_plate_province_index = 0U;     /* 省份索引 (0=京) */
+static uint8_t g_lcd_plate_letter_index = 0U;       /* 字母索引 (0=A) */
+static uint8_t g_lcd_plate_digits[5] = {0U};        /* 5位数字(0=0, 1=1...35=Z) */
 
 
 
 
-static uint8_t g_lcd_home_subpage = 0U; /* 0=主主界面 1=副主界面 */
+/* 主页子页面: 0=主主页, 1=副主页 (显示更多信息) */
+static uint8_t g_lcd_home_subpage = 0U;
 #define LCD_TEXT_MSG_LINES_PER_PAGE 3U
 #define LCD_TEXT_MSG_LINE_MAX_CHARS 10U
 
@@ -2671,6 +2723,31 @@ static rt_bool_t lcd_handle_text_normal_keys(void)
 }
 
 
+/*
+ * ============================================================
+ *  主页数据更新接口
+ * ============================================================
+ *
+ * 这些函数由其他服务模块(如 GPS 定位、速度采集等)调用,
+ * 用于更新 LCD 主页的显示数据。
+ *
+ * 更新策略:
+ *   每个函数更新对应字段, 同时保留其他字段不变。
+ *   通过 lcd_home_ui_set_data() 内部的比较逻辑,
+ *   只有在数据真正变化时才触发重绘。
+ *
+ * 为什么不在每个 update 函数中都设置 g_lcd_need_redraw?
+ *   lcd_home_ui_set_data() 内部已经处理了变化检测和重绘标志。
+ *   只有 svc_lcd_update_top_status 和 svc_lcd_update_home_location
+ *   是直接修改字段并检查是否需要重绘的。
+ *
+ * 线程安全性:
+ *   这些函数可能在多个线程(如 GPS 线程、CAN 线程)中被调用,
+ *   LCD 线程也在读取这些数据。由于都是对 uint8/uint16/uint32
+ *   的单次写入, 在 Cortex-M 上是原子操作, 不需要加锁。
+ */
+
+/** 更新时间 (时/分/秒) */
 void svc_lcd_update_home_time(uint8_t hour, uint8_t minute, uint8_t second)
 {
     (void)lcd_home_ui_set_data(g_lcd_home_ui.speed_kmh_x10,
@@ -2683,17 +2760,20 @@ void svc_lcd_update_home_time(uint8_t hour, uint8_t minute, uint8_t second)
                                g_lcd_home_ui.card_id);
 }
 
+/** 更新顶部状态栏 (GPS/卡状态/记录状态等的位图) */
 void svc_lcd_update_top_status(uint8_t value)
 {
     if (g_lcd_home_ui.top_status_value != value) {
         g_lcd_home_ui.top_status_value = value;
 
+        /* 只在主页显示时触发重绘 */
         if (g_lcd_menu_mode == RT_FALSE) {
             g_lcd_need_redraw = RT_TRUE;
         }
     }
 }
 
+/** 更新速度 (×10, 单位 0.1 km/h) */
 void svc_lcd_update_home_speed(uint16_t speed_kmh_x10)
 {
     (void)lcd_home_ui_set_data(speed_kmh_x10,
@@ -2706,6 +2786,7 @@ void svc_lcd_update_home_speed(uint16_t speed_kmh_x10)
                                g_lcd_home_ui.card_id);
 }
 
+/** 更新行驶时间 (从行程开始累计) */
 void svc_lcd_update_drive_time(uint8_t hour, uint8_t minute, uint8_t second)
 {
     (void)lcd_home_ui_set_data(g_lcd_home_ui.speed_kmh_x10,
@@ -2718,6 +2799,7 @@ void svc_lcd_update_drive_time(uint8_t hour, uint8_t minute, uint8_t second)
                                g_lcd_home_ui.card_id);
 }
 
+/** 更新驾驶员卡号 (20 位数字, 不插卡时全 0) */
 void svc_lcd_update_card_id(const char *card_id)
 {
     if (card_id == RT_NULL) {
@@ -3177,34 +3259,76 @@ static void lcd_render_boot_check_ui(void)
 
 
 
+/*
+ * ============================================================
+ *  svc_lcd_init — LCD 子系统初始化
+ * ============================================================
+ *
+ * 初始化顺序 (有严格的依赖关系):
+ *   1) lcd_drv_init()       ← 必须先初始化硬件 (GPIO + SPI + ST7567)
+ *   2) lcd_ui_data_reset()  ← 重置显示数据 (默认时间 09:16:45)
+ *   3) 注册列表资源、页面节点、钩子、fallback 渲染器
+ *   4) u8g2_port_init()     ← 初始化 u8g2 图形库 (依赖硬件就绪)
+ *
+ * 注意: lcd_drv_init() 内部已经做了清屏和打开显示,
+ *       所以不需要额外调用 lcd_fb_public_clear/flush
+ */
 int svc_lcd_init(void)
 {
-    lcd_drv_init();
-    lcd_ui_data_reset();
-    lcd_ui_list_register(g_lcd_list_resources,
+    lcd_drv_init();                          /* 初始化硬件驱动 */
+    lcd_ui_data_reset();                     /* 重置显示数据 */
+    lcd_ui_list_register(g_lcd_list_resources,              /* 注册菜单列表资源 */
                          (uint8_t)(sizeof(g_lcd_list_resources) / sizeof(g_lcd_list_resources[0])));
-    lcd_ui_pages_register(g_lcd_pages, LCD_PAGE_MAX);
-    lcd_ui_nav_set_enter_hook(lcd_page_on_enter_prepare);
-    lcd_ui_render_set_fallback(lcd_render_submenu_ui);
-    u8g2_port_init();
+    lcd_ui_pages_register(g_lcd_pages, LCD_PAGE_MAX);       /* 注册页面节点 */
+    lcd_ui_nav_set_enter_hook(lcd_page_on_enter_prepare);   /* 注册页面进入钩子 */
+    lcd_ui_render_set_fallback(lcd_render_submenu_ui);      /* 注册通用渲染器 */
+    u8g2_port_init();                        /* 初始化 u8g2 图形库 */
     APP_NON_CAN_LOG("LCD ST7567 init done\r\n");
     return RT_EOK;
 }
 
 
+/*
+ * ============================================================
+ *  svc_lcd_thread_entry — LCD UI 线程入口 (核心事件循环)
+ * ============================================================
+ *
+ * 这个线程是 LCD 模块的"大脑", 负责:
+ *   1) 显示开机自检页面 5 秒
+ *   2) 进入主循环, 持续处理按键事件
+ *   3) 驱动页面刷新
+ *
+ * 事件处理顺序 (优先级从高到低):
+ *   1) 主页按键 (S1~S4)
+ *   2) 文本消息按键 (lcd_handle_text_normal_keys)
+ *   3) 车牌编辑按键 (lcd_handle_plate_set_keys)
+ *   4) 电话号码编辑按键 (lcd_handle_local_phone_keys)
+ *   5) 通用方向/确认/返回键
+ *
+ * 为什么用 if-else 链而不是统一接收所有按键?
+ *   不同页面模式下按键的含义不同。例如:
+ *   - 主页: S1/S4 切换子页面, S4 进入菜单
+ *   - 编辑页面: S1/S4 修改值, S2/S3 在字段间移动
+ *   所以按键处理必须与当前页面 ID 绑定。
+ *
+ * 刷新策略:
+ *   每次按键处理后立即渲染, 确保响应迅速。
+ *   g_lcd_need_redraw 标志控制是否需要重绘。
+ */
 static void svc_lcd_thread_entry(void *arg)
 {
     RT_UNUSED(arg);
 
-    lcd_backlight_on();
+    lcd_backlight_on();                     /* 打开背光 */
 
-    lcd_ui_core_reset();
+    lcd_ui_core_reset();                    /* 重置 UI 到主页 */
 
     APP_NON_CAN_LOG("LCD: ui thread start\r\n");
 
+    /* 等待 ADC 初始化完成 (ADC 驱动初始化和按键消抖) */
     rt_thread_mdelay(APP_ADC_STARTUP_DELAY_MS + 100);
 
-    /* Boot check page: stay 5 seconds, then enter home UI. */
+    /* === 显示开机自检画面, 5 秒后进入主页 === */
     lcd_render_boot_check_ui();
     rt_thread_mdelay(5000);
 
@@ -3461,6 +3585,22 @@ static void svc_lcd_thread_entry(void *arg)
 
 
 
+/*
+ * ============================================================
+ *  svc_lcd_task_start — 创建 LCD UI 线程
+ * ============================================================
+ *
+ * 线程参数:
+ *   栈大小: APP_LCD_TASK_STACK_SIZE (在 app_config.h 配置)
+ *   优先级: APP_LCD_TASK_PRIORITY (通常 18, 中等偏低)
+ *   时间片: APP_LCD_TASK_TICK
+ *
+ * 为什么 LCD 线程优先级较低 (18)?
+ *   LCD 刷新涉及大量的 u8g2 渲染和 SPI 通信, 耗时较长。
+ *   如果优先级太高, 会抢占 CAN 通信等关键任务。
+ *   因为人眼对 LCD 刷新频率不敏感 (50ms 刷新就足够流畅),
+ *   所以 LCD 任务可以放在低优先级。
+ */
 int svc_lcd_task_start(void)
 {
     rt_thread_t thread;
@@ -4076,8 +4216,6 @@ static rt_bool_t lcd_handle_local_phone_keys(void)
 
     return RT_TRUE;
 }
-
-
 
 
 
