@@ -145,8 +145,8 @@ static void app_uart_cmd_dump_tx_frame(const char *tag, const uint8_t *buf, uint
     }
     rt_kprintf("\n");
 }
-
-
+static void app_uart_cmd_force_finish_text_frame(void);
+static void app_usart_cmd_push_bytes(const uint8_t *data, uint16_t len);
 static uint16_t app_uart_cmd_crc16(const uint8_t *data, uint16_t len)
 {
     static const uint16_t crc16_half_byte[16] = {
@@ -200,75 +200,210 @@ static rt_bool_t app_uart_cmd_check_crc(const uint8_t *buf, uint8_t len)
     return (calc_crc == recv_crc) ? RT_TRUE : RT_FALSE;
 }
 
-
-
 static rt_bool_t app_uart_cmd_try_parse_frame(app_uart_cmd_frame_t *frame)
 {
-    /* 串口收到的是连续字节流，这里用状态机切出完整协议帧。 */
-    static uint8_t state = 0U;
     static uint8_t temp[APP_UART_CMD_FRAME_MAX_SIZE];
     static uint8_t index = 0U;
     static uint8_t expect_len = 0U;
     uint8_t byte;
+    uint8_t i;
+    uint8_t next_head;
+    uint8_t remain_len;
+
+    if (frame == RT_NULL) {
+        return RT_FALSE;
+    }
 
     while (app_uart_cmd_ring_pop(&g_uart_cmd_rx_ring, &byte) == RT_TRUE) {
-        switch (state) {
-        case 0:
-            if (byte == APP_UART_CMD_FRAME_HEAD) {
-                temp[0] = byte;
-                index = 1U;
-                expect_len = 0U;
-                state = 1U;
+        if (index == 0U) {
+            if (byte != APP_UART_CMD_FRAME_HEAD) {
+                continue;
             }
-            break;
 
-        case 1:
-            temp[index++] = byte;
-            expect_len = byte;
+            temp[0] = byte;
+            index = 1U;
+            expect_len = 0U;
+            continue;
+        }
 
-            if ((expect_len < 3U) || (expect_len > APP_UART_CMD_FRAME_MAX_SIZE)) {
-                state = 0U;
+        temp[index++] = byte;
+
+        if (index == 2U) {
+            expect_len = temp[1];
+
+            if ((expect_len < 6U) || (expect_len > APP_UART_CMD_FRAME_MAX_SIZE)) {
                 index = 0U;
                 expect_len = 0U;
-            } else {
-                state = 2U;
-            }
-            break;
 
-        case 2:
-            temp[index++] = byte;
-
-            if (index >= expect_len) {
-                if ((temp[expect_len - 1U] == APP_UART_CMD_FRAME_TAIL) &&
-                    (app_uart_cmd_check_crc(temp, expect_len) == RT_TRUE)) {
-                    frame->length = expect_len;
-                    rt_memcpy(frame->data, temp, expect_len);
-
-                    state = 0U;
-                    index = 0U;
-                    expect_len = 0U;
-                    return RT_TRUE;
+                if (byte == APP_UART_CMD_FRAME_HEAD) {
+                    temp[0] = byte;
+                    index = 1U;
                 }
-
-                rt_kprintf("[uart_cmd][crc/tail err] len=%u\n", expect_len);
-
-                state = 0U;
-                index = 0U;
-                expect_len = 0U;
             }
 
-            break;
+            continue;
+        }
 
-        default:
-            state = 0U;
+        if (index == 3U) {
+            if ((temp[2] != APP_UART_CMD_TYPE_SOC_STATUS) &&
+                (temp[2] != APP_UART_CMD_TEXT_FRAME_TYPE)) {
+                index = 0U;
+                expect_len = 0U;
+                continue;
+            }
+        }
+
+
+        if (index < expect_len) {
+            continue;
+        }
+
+        if ((temp[expect_len - 1U] == APP_UART_CMD_FRAME_TAIL) &&
+            (app_uart_cmd_check_crc(temp, expect_len) == RT_TRUE)) {
+            frame->length = expect_len;
+            rt_memcpy(frame->data, temp, expect_len);
+
             index = 0U;
             expect_len = 0U;
-            break;
+            return RT_TRUE;
+        }
+        if ((expect_len >= 7U) &&
+            (temp[2] == APP_UART_CMD_TEXT_FRAME_TYPE) &&
+            (temp[3] == 1U)) {
+            uint8_t dump_i;
+            uint16_t calc_crc;
+            uint16_t recv_crc;
+
+            calc_crc = app_uart_cmd_crc16(&temp[3], (uint16_t)(expect_len - 6U));
+            recv_crc = (uint16_t)temp[expect_len - 3U] |
+                       ((uint16_t)temp[expect_len - 2U] << 8);
+
+            rt_kprintf("[uart_cmd][bad text end] len=%u calc=0x%04X recv=0x%04X tail=0x%02X data:",
+                       expect_len,
+                       calc_crc,
+                       recv_crc,
+                       temp[expect_len - 1U]);
+
+            for (dump_i = 0U; dump_i < expect_len; dump_i++) {
+                rt_kprintf(" %02X", temp[dump_i]);
+            }
+
+            rt_kprintf("\n");
+
+            app_uart_cmd_force_finish_text_frame();
+        }
+
+
+
+
+        /*
+         * Candidate frame failed.
+         * Do not discard the whole candidate. Search another 0xAA inside it
+         * and keep bytes after that 0xAA for resync.
+         */
+        next_head = 0U;
+        for (i = 1U; i < index; i++) {
+            if (temp[i] == APP_UART_CMD_FRAME_HEAD) {
+                next_head = i;
+                break;
+            }
+        }
+
+        if (next_head == 0U) {
+            index = 0U;
+            expect_len = 0U;
+            continue;
+        }
+
+        remain_len = (uint8_t)(index - next_head);
+        for (i = 0U; i < remain_len; i++) {
+            temp[i] = temp[next_head + i];
+        }
+
+        index = remain_len;
+        expect_len = 0U;
+
+        if (index >= 2U) {
+            expect_len = temp[1];
+
+            if ((expect_len < 6U) || (expect_len > APP_UART_CMD_FRAME_MAX_SIZE)) {
+                index = 0U;
+                expect_len = 0U;
+            }
         }
     }
 
     return RT_FALSE;
 }
+
+
+//static rt_bool_t app_uart_cmd_try_parse_frame(app_uart_cmd_frame_t *frame)
+//{
+//    /* 串口收到的是连续字节流，这里用状态机切出完整协议帧。 */
+//    static uint8_t state = 0U;
+//    static uint8_t temp[APP_UART_CMD_FRAME_MAX_SIZE];
+//    static uint8_t index = 0U;
+//    static uint8_t expect_len = 0U;
+//    uint8_t byte;
+//
+//    while (app_uart_cmd_ring_pop(&g_uart_cmd_rx_ring, &byte) == RT_TRUE) {
+//        switch (state) {
+//        case 0:
+//            if (byte == APP_UART_CMD_FRAME_HEAD) {
+//                temp[0] = byte;
+//                index = 1U;
+//                expect_len = 0U;
+//                state = 1U;
+//            }
+//            break;
+//
+//        case 1:
+//            temp[index++] = byte;
+//            expect_len = byte;
+//
+//            if ((expect_len < 3U) || (expect_len > APP_UART_CMD_FRAME_MAX_SIZE)) {
+//                state = 0U;
+//                index = 0U;
+//                expect_len = 0U;
+//            } else {
+//                state = 2U;
+//            }
+//            break;
+//
+//        case 2:
+//            temp[index++] = byte;
+//
+//            if (index >= expect_len) {
+//                if ((temp[expect_len - 1U] == APP_UART_CMD_FRAME_TAIL) &&
+//                    (app_uart_cmd_check_crc(temp, expect_len) == RT_TRUE)) {
+//                    frame->length = expect_len;
+//                    rt_memcpy(frame->data, temp, expect_len);
+//
+//                    state = 0U;
+//                    index = 0U;
+//                    expect_len = 0U;
+//                    return RT_TRUE;
+//                }
+//
+//                rt_kprintf("[uart_cmd][crc/tail err] len=%u\n", expect_len);
+//
+//                state = 0U;
+//                index = 0U;
+//                expect_len = 0U;
+//            }
+//
+//            break;
+//
+//        default:
+//            state = 0U;
+//            index = 0U;
+//            expect_len = 0U;
+//            break;
+//        }
+//    }
+//
+//    return RT_FALSE;
+//}
 
 static uint16_t app_uart_cmd_build_ack(uint8_t type, uint8_t ret, uint8_t *buf, uint16_t buf_size)
 {
@@ -408,25 +543,60 @@ static void app_uart_cmd_uart_tx(const uint8_t *data, uint16_t len)
     rt_device_write(g_uart_cmd_dev, 0, data, len);
 }
 
+//static rt_err_t app_uart_cmd_rx_indicate(rt_device_t dev, rt_size_t size)
+//{
+//    uint8_t ch;
+//    rt_bool_t has_data = RT_FALSE;
+//
+//    RT_UNUSED(dev);
+//
+//    while (size-- > 0U) {
+//        if (rt_device_read(g_uart_cmd_dev, 0, &ch, 1) == 1) {
+//            app_usart_cmd_push_byte(ch);
+//            has_data = RT_TRUE;
+//
+//
+//        } else {
+//            break;
+//        }
+//    }
+//
+//    /* 回调里只搬字节，真正解析放到线程里做，避免阻塞串口接收。 */
+//    if (has_data == RT_TRUE) {
+//        rt_sem_release(&g_uart_cmd_rx_sem);
+//    }
+//
+//    return RT_EOK;
+//}
 static rt_err_t app_uart_cmd_rx_indicate(rt_device_t dev, rt_size_t size)
 {
-    uint8_t ch;
+    uint8_t rx_buf[128];
+    rt_size_t read_len;
     rt_bool_t has_data = RT_FALSE;
 
     RT_UNUSED(dev);
 
-    while (size-- > 0U) {
-        if (rt_device_read(g_uart_cmd_dev, 0, &ch, 1) == 1) {
-            app_usart_cmd_push_byte(ch);
-            has_data = RT_TRUE;
+    while (size > 0U) {
+        read_len = size;
+        if (read_len > sizeof(rx_buf)) {
+            read_len = sizeof(rx_buf);
+        }
 
-
-        } else {
+        read_len = rt_device_read(g_uart_cmd_dev, 0, rx_buf, read_len);
+        if (read_len == 0U) {
             break;
+        }
+
+        app_usart_cmd_push_bytes(rx_buf, (uint16_t)read_len);
+        has_data = RT_TRUE;
+
+        if (size >= read_len) {
+            size -= read_len;
+        } else {
+            size = 0U;
         }
     }
 
-    /* 回调里只搬字节，真正解析放到线程里做，避免阻塞串口接收。 */
     if (has_data == RT_TRUE) {
         rt_sem_release(&g_uart_cmd_rx_sem);
     }
@@ -660,20 +830,153 @@ static rt_bool_t app_uart_cmd_parse_soc_status(const app_uart_cmd_frame_t *frame
     return RT_TRUE;
 }
 
+static void app_uart_cmd_force_finish_text_frame(void)
+{
+    if (g_uart_cmd_text_assem_len == 0U) {
+        return;
+    }
+
+    g_uart_cmd_text_msg.valid = 1U;
+    g_uart_cmd_text_msg.text_len = g_uart_cmd_text_assem_len;
+
+    svc_lcd_update_text_message(g_uart_cmd_text_msg.flag,
+                                g_uart_cmd_text_msg.text_type,
+                                g_uart_cmd_text_msg.text,
+                                g_uart_cmd_text_msg.text_len);
+
+    rt_kprintf("[uart_cmd][text force done] len=%u\n",
+               (unsigned int)g_uart_cmd_text_msg.text_len);
+
+    g_uart_cmd_text_assem_len = 0U;
+}
+
+
+
+//static rt_bool_t app_uart_cmd_parse_text_frame(const app_uart_cmd_frame_t *frame)
+//{
+//    /*
+//     * 文本消息分包规则：
+//     * 1. 首包：cmd + state + flag + type + text
+//     * 2. 续包：cmd + state + text
+//     *
+//     * 所以这里不能把所有分包都按同一种偏移处理，否则 UTF-8 会从错误字节开始拼接。
+//     */
+//    uint8_t payload_len;
+//    uint8_t transfer_state;
+//    uint8_t flag;
+//    uint8_t text_type;
+//    uint16_t chunk_len;
+//    uint8_t text_offset;
+//
+//    if (frame == RT_NULL) {
+//        return RT_FALSE;
+//    }
+//
+//    if ((frame->length < 7U) ||
+//        (frame->data[0] != APP_UART_CMD_FRAME_HEAD) ||
+//        (frame->data[2] != APP_UART_CMD_TEXT_FRAME_TYPE)) {
+//        return RT_FALSE;
+//    }
+//
+//    payload_len = (uint8_t)(frame->length - 6U); /* 去掉 head len cmd crc tail */
+//    if (payload_len < 2U) {
+//        return RT_FALSE;
+//    }
+//
+//    transfer_state = frame->data[3];
+//
+//    /*
+//     * 首包格式：
+//     *   cmd, state, flag, type, text...
+//     *
+//     * 续包格式：
+//     *   cmd, state, text...
+//     */
+//    if (g_uart_cmd_text_assem_len == 0U) {
+//        if (payload_len < 3U) {
+//            return RT_FALSE;
+//        }
+//
+//        flag = frame->data[4];
+//        text_type = frame->data[5];
+//
+//        if ((text_type != 1U) && (text_type != 2U)) {
+//            rt_kprintf("[uart_cmd][text] invalid first header state=%u flag=0x%02X type=%u len=%u\n",
+//                       transfer_state,
+//                       flag,
+//                       text_type,
+//                       frame->length);
+//            g_uart_cmd_text_assem_len = 0U;
+//            g_uart_cmd_text_msg.valid = 0U;
+//            return RT_FALSE;
+//        }
+//
+//        g_uart_cmd_text_msg.flag = flag;
+//        g_uart_cmd_text_msg.text_type = text_type;
+//
+//        text_offset = 6U;
+//        chunk_len = (uint16_t)(payload_len - 3U);
+//    } else {
+//        flag = g_uart_cmd_text_msg.flag;
+//        text_type = g_uart_cmd_text_msg.text_type;
+//
+//        text_offset = 4U;
+//        chunk_len = (uint16_t)(payload_len - 1U);
+//    }
+//
+//    /* 缓存上限按“整条消息”控制，超过上限就丢弃这条文本。 */
+//    if ((g_uart_cmd_text_assem_len + chunk_len) > APP_UART_CMD_TEXT_MAX_SIZE) {
+//        rt_kprintf("[uart_cmd][text] overflow chunk=%u total=%u\n",
+//                   (unsigned int)chunk_len,
+//                   (unsigned int)(g_uart_cmd_text_assem_len + chunk_len));
+//        g_uart_cmd_text_assem_len = 0U;
+//        g_uart_cmd_text_msg.valid = 0U;
+//        return RT_FALSE;
+//    }
+//
+//    /* 正文保持原始 UTF-8 顺序拼接，显示阶段再逐字符解码。 */
+//    rt_memcpy(&g_uart_cmd_text_msg.text[g_uart_cmd_text_assem_len],
+//              &frame->data[text_offset],
+//              chunk_len);
+//    g_uart_cmd_text_assem_len = (uint16_t)(g_uart_cmd_text_assem_len + chunk_len);
+//    g_uart_cmd_text_msg.text[g_uart_cmd_text_assem_len] = '\0';
+//
+//    rt_kprintf("[uart_cmd][text] state=%u flag=0x%02X type=%u chunk=%u total=%u\n",
+//               transfer_state,
+//               flag,
+//               text_type,
+//               (unsigned int)chunk_len,
+//               (unsigned int)g_uart_cmd_text_assem_len);
+//
+//    if (transfer_state == 1U) {
+//        /* state==1 表示整条文本已经收完，此时才把消息标记为有效。 */
+//        g_uart_cmd_text_msg.valid = 1U;
+//        g_uart_cmd_text_msg.flag = flag;
+//        g_uart_cmd_text_msg.text_type = text_type;
+//        g_uart_cmd_text_msg.text_len = g_uart_cmd_text_assem_len;
+//
+//        svc_lcd_update_text_message(g_uart_cmd_text_msg.flag,
+//                                    g_uart_cmd_text_msg.text_type,
+//                                    g_uart_cmd_text_msg.text,
+//                                    g_uart_cmd_text_msg.text_len);
+//
+//        rt_kprintf("[uart_cmd][text done] len=%u\n",
+//                   (unsigned int)g_uart_cmd_text_msg.text_len);
+//
+//        g_uart_cmd_text_assem_len = 0U;
+//    }
+//
+//    return RT_TRUE;
+//}
 static rt_bool_t app_uart_cmd_parse_text_frame(const app_uart_cmd_frame_t *frame)
 {
-    /*
-     * 文本消息分包规则：
-     * 1. 首包：cmd + state + flag + type + text
-     * 2. 续包：cmd + state + text
-     *
-     * 所以这里不能把所有分包都按同一种偏移处理，否则 UTF-8 会从错误字节开始拼接。
-     */
     uint8_t payload_len;
     uint8_t transfer_state;
     uint8_t flag;
     uint8_t text_type;
     uint16_t chunk_len;
+    uint16_t copy_len;
+    uint16_t remain_len;
     uint8_t text_offset;
 
     if (frame == RT_NULL) {
@@ -686,20 +989,13 @@ static rt_bool_t app_uart_cmd_parse_text_frame(const app_uart_cmd_frame_t *frame
         return RT_FALSE;
     }
 
-    payload_len = (uint8_t)(frame->length - 6U); /* 去掉 head len cmd crc tail */
+    payload_len = (uint8_t)(frame->length - 6U);
     if (payload_len < 2U) {
         return RT_FALSE;
     }
 
     transfer_state = frame->data[3];
 
-    /*
-     * 首包格式：
-     *   cmd, state, flag, type, text...
-     *
-     * 续包格式：
-     *   cmd, state, text...
-     */
     if (g_uart_cmd_text_assem_len == 0U) {
         if (payload_len < 3U) {
             return RT_FALSE;
@@ -732,32 +1028,50 @@ static rt_bool_t app_uart_cmd_parse_text_frame(const app_uart_cmd_frame_t *frame
         chunk_len = (uint16_t)(payload_len - 1U);
     }
 
-    /* 缓存上限按“整条消息”控制，超过上限就丢弃这条文本。 */
-    if ((g_uart_cmd_text_assem_len + chunk_len) > APP_UART_CMD_TEXT_MAX_SIZE) {
-        rt_kprintf("[uart_cmd][text] overflow chunk=%u total=%u\n",
-                   (unsigned int)chunk_len,
-                   (unsigned int)(g_uart_cmd_text_assem_len + chunk_len));
-        g_uart_cmd_text_assem_len = 0U;
-        g_uart_cmd_text_msg.valid = 0U;
-        return RT_FALSE;
+    copy_len = 0U;
+
+    if (g_uart_cmd_text_assem_len < APP_UART_CMD_TEXT_MAX_SIZE) {
+        copy_len = chunk_len;
+
+        remain_len = (uint16_t)(APP_UART_CMD_TEXT_MAX_SIZE - g_uart_cmd_text_assem_len);
+
+        if (copy_len > remain_len) {
+            copy_len = remain_len;
+        }
+
+        if (copy_len > 0U) {
+            rt_memcpy(&g_uart_cmd_text_msg.text[g_uart_cmd_text_assem_len],
+                      &frame->data[text_offset],
+                      copy_len);
+            g_uart_cmd_text_assem_len = (uint16_t)(g_uart_cmd_text_assem_len + copy_len);
+            g_uart_cmd_text_msg.text[g_uart_cmd_text_assem_len] = '\0';
+        }
     }
 
-    /* 正文保持原始 UTF-8 顺序拼接，显示阶段再逐字符解码。 */
-    rt_memcpy(&g_uart_cmd_text_msg.text[g_uart_cmd_text_assem_len],
-              &frame->data[text_offset],
-              chunk_len);
-    g_uart_cmd_text_assem_len = (uint16_t)(g_uart_cmd_text_assem_len + chunk_len);
-    g_uart_cmd_text_msg.text[g_uart_cmd_text_assem_len] = '\0';
+//    rt_kprintf("[uart_cmd][text] len=%u raw=%02X %02X %02X %02X %02X %02X state=%u chunk=%u copy=%u total=%u\n",
+//               frame->length,
+//               frame->data[0],
+//               frame->data[1],
+//               frame->data[2],
+//               frame->data[3],
+//               frame->data[4],
+//               frame->data[5],
+//               transfer_state,
+//               (unsigned int)chunk_len,
+//               (unsigned int)copy_len,
+//               (unsigned int)g_uart_cmd_text_assem_len);
 
-    rt_kprintf("[uart_cmd][text] state=%u flag=0x%02X type=%u chunk=%u total=%u\n",
-               transfer_state,
-               flag,
-               text_type,
-               (unsigned int)chunk_len,
-               (unsigned int)g_uart_cmd_text_assem_len);
 
     if (transfer_state == 1U) {
-        /* state==1 表示整条文本已经收完，此时才把消息标记为有效。 */
+        {
+                uint8_t i;
+
+                rt_kprintf("[uart_cmd][text last frame] len=%u data:", frame->length);
+                for (i = 0U; i < frame->length; i++) {
+                    rt_kprintf(" %02X", frame->data[i]);
+                }
+                rt_kprintf("\n");
+            }
         g_uart_cmd_text_msg.valid = 1U;
         g_uart_cmd_text_msg.flag = flag;
         g_uart_cmd_text_msg.text_type = text_type;
@@ -873,6 +1187,20 @@ void app_usart_cmd_set_tx_callback(app_uart_cmd_tx_fn_t tx_cb)
     g_uart_cmd_tx_cb = tx_cb;
 }
 
+static void app_usart_cmd_push_bytes(const uint8_t *data, uint16_t len)
+{
+    uint16_t i;
+
+    if ((data == RT_NULL) || (len == 0U)) {
+        return;
+    }
+
+    for (i = 0U; i < len; i++) {
+        app_usart_cmd_push_byte(data[i]);
+    }
+}
+
+
 void app_usart_cmd_push_byte(uint8_t byte)
 {
     if (app_uart_cmd_ring_push(&g_uart_cmd_rx_ring, byte) != RT_TRUE) {
@@ -957,7 +1285,7 @@ void app_usart_cmd_poll(void)
             continue;
         }
 
-        app_uart_cmd_dump_frame(frame.data, frame.length);
+        //app_uart_cmd_dump_frame(frame.data, frame.length);
 
 
         if (app_uart_cmd_parse_soc_status(&frame, &msg) != RT_TRUE) {

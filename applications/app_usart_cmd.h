@@ -40,7 +40,7 @@
 #define APP_UART_CMD_DEV_NAME            "uart3"          /* 使用的串口设备名 */
 #define APP_UART_CMD_FRAME_HEAD          0xAAU            /* 帧头 */
 #define APP_UART_CMD_FRAME_TAIL          0x55U            /* 帧尾 */
-#define APP_UART_CMD_FRAME_MAX_SIZE      256U             /* 单帧最大长度 */
+#define APP_UART_CMD_FRAME_MAX_SIZE      512U             /* 单帧最大长度 */
 #define APP_UART_CMD_RX_BUF_SIZE         4096U            /* 接收环形缓冲区大小 (4KB) */
 
 /* ---- 文本消息参数 ---- */
@@ -57,8 +57,8 @@
 
 /* ---- 接收任务配置 ---- */
 #define APP_UART_CMD_TASK_NAME           "uart_cmd"
-#define APP_UART_CMD_TASK_STACK_SIZE     1024
-#define APP_UART_CMD_TASK_PRIORITY       18               /* 较低优先级 */
+#define APP_UART_CMD_TASK_STACK_SIZE     2048
+#define APP_UART_CMD_TASK_PRIORITY       10               /* 较低优先级 */
 #define APP_UART_CMD_TASK_TICK           10
 
 /* ---- 版本发送任务配置 ---- */
@@ -77,7 +77,7 @@
 typedef struct
 {
     uint8_t data[APP_UART_CMD_FRAME_MAX_SIZE];  /* 帧数据 */
-    uint8_t length;                              /* 帧长度 */
+    uint16_t length;                              /* 帧长度 */
 } app_uart_cmd_frame_t;
 
 /*
