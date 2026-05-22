@@ -61,6 +61,9 @@
 #define SVC_STORAGE_CONFIG_MAGIC         0x434F4E46UL /* 魔数 "CONF" (ASCII 编码) */
 #define SVC_STORAGE_CONFIG_VERSION       2U           /* 配置记录格式版本 */
 
+#define SVC_STORAGE_VIN_ADDR             0x0100U
+#define SVC_STORAGE_VIN_MAGIC            0x56494E31UL /* "VIN1" */
+#define SVC_STORAGE_VIN_VERSION          1U
 
 /*
  * ============================================================
@@ -130,6 +133,15 @@ typedef struct
 } svc_storage_config_record_t;
 
 
+typedef struct
+{
+    uint32_t magic;
+    uint16_t version;
+    uint16_t length;
+    svc_storage_vin_t vin;
+    uint8_t reserved[1];
+    uint32_t checksum;
+} svc_storage_vin_record_t;
 
 
 /* I2C 总线设备句柄, 通过 rt_device_find() 获取 */
@@ -504,6 +516,63 @@ static rt_bool_t svc_storage_plate_number_valid(const svc_storage_plate_number_t
 
     return (plate_number->digits[5] == '\0') ? RT_TRUE : RT_FALSE;
 }
+
+static rt_bool_t svc_storage_vin_valid(const svc_storage_vin_t *vin)
+{
+    uint8_t i;
+
+    if (vin == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if (vin->valid > 1U) {
+        return RT_FALSE;
+    }
+
+    if (vin->vin[SVC_STORAGE_VIN_LEN] != '\0') {
+        return RT_FALSE;
+    }
+
+    if (vin->valid == 0U) {
+        return RT_TRUE;
+    }
+
+    for (i = 0U; i < SVC_STORAGE_VIN_LEN; i++) {
+        char ch = vin->vin[i];
+
+        if (!((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z'))) {
+            return RT_FALSE;
+        }
+    }
+
+    return RT_TRUE;
+}
+
+static rt_bool_t svc_storage_vin_record_is_valid(const svc_storage_vin_record_t *record)
+{
+    uint32_t checksum;
+
+    if (record == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if ((record->magic != SVC_STORAGE_VIN_MAGIC) ||
+        (record->version != SVC_STORAGE_VIN_VERSION) ||
+        (record->length != sizeof(svc_storage_vin_record_t))) {
+        return RT_FALSE;
+    }
+
+    if (svc_storage_vin_valid(&record->vin) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    checksum = svc_storage_checksum((const uint8_t *)record,
+                                    (uint16_t)(sizeof(svc_storage_vin_record_t) -
+                                               sizeof(record->checksum)));
+
+    return (checksum == record->checksum) ? RT_TRUE : RT_FALSE;
+}
+
 
 
 /**
@@ -994,3 +1063,64 @@ rt_bool_t svc_storage_save_plate_number(const svc_storage_plate_number_t *plate_
 
     return svc_storage_save_config(&config);
 }
+
+rt_bool_t svc_storage_load_vin(svc_storage_vin_t *vin)
+{
+    svc_storage_vin_record_t record;
+
+    if (vin == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if ((g_eeprom_i2c_bus == RT_NULL) ||
+        (svc_eeprom_read(SVC_STORAGE_VIN_ADDR,
+                         (uint8_t *)&record,
+                         sizeof(record)) != RT_TRUE) ||
+        (svc_storage_vin_record_is_valid(&record) != RT_TRUE)) {
+        vin->valid = 0U;
+        rt_memset(vin->vin, 0, sizeof(vin->vin));
+        return RT_FALSE;
+    }
+
+    *vin = record.vin;
+    return RT_TRUE;
+}
+
+rt_bool_t svc_storage_save_vin(const svc_storage_vin_t *vin)
+{
+    svc_storage_vin_record_t record;
+    svc_storage_vin_record_t verify;
+
+    if (svc_storage_vin_valid(vin) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    if (g_eeprom_i2c_bus == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    rt_memset(&record, 0, sizeof(record));
+    record.magic = SVC_STORAGE_VIN_MAGIC;
+    record.version = SVC_STORAGE_VIN_VERSION;
+    record.length = sizeof(record);
+    record.vin = *vin;
+
+    record.checksum = svc_storage_checksum((const uint8_t *)&record,
+                                           (uint16_t)(sizeof(record) -
+                                                      sizeof(record.checksum)));
+
+    if (svc_eeprom_write(SVC_STORAGE_VIN_ADDR,
+                         (const uint8_t *)&record,
+                         sizeof(record)) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    if (svc_eeprom_read(SVC_STORAGE_VIN_ADDR,
+                        (uint8_t *)&verify,
+                        sizeof(verify)) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    return svc_storage_vin_record_is_valid(&verify);
+}
+

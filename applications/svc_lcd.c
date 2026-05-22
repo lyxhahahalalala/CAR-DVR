@@ -95,6 +95,16 @@ static uint8_t g_lcd_plate_letter_index = 0U;       /* 字母索引 (0=A) */
 static uint8_t g_lcd_plate_digits[5] = {0U};        /* 5位数字(0=0, 1=1...35=Z) */
 
 
+#define LCD_VIN_LEN             17U
+#define LCD_VIN_FOCUS_CONFIRM   LCD_VIN_LEN
+#define LCD_VIN_FOCUS_EXIT      (LCD_VIN_LEN + 1U)
+#define LCD_VIN_FOCUS_MAX       LCD_VIN_FOCUS_EXIT
+#define LCD_VIN_CHAR_COUNT      36U
+
+static uint8_t g_lcd_vin_dirty = 0U;
+static uint8_t g_lcd_vin_valid = 0U;
+static uint8_t g_lcd_vin_focus = 0U;
+static uint8_t g_lcd_vin_chars[LCD_VIN_LEN] = {0U};
 
 
 /* 主页子页面: 0=主主页, 1=副主页 (显示更多信息) */
@@ -632,7 +642,11 @@ static void lcd_plate_draw_ascii_option(u8g2_t *u8g2,
                                         char ch,
                                         rt_bool_t selected);
 static void lcd_plate_save_and_ok(void);
-
+static void lcd_render_vin_set_ui(void);
+static void lcd_prepare_vin_set_page(void);
+static rt_bool_t lcd_handle_vin_set_keys(void);
+static void lcd_vin_save_and_ok(void);
+static void lcd_vin_draw_top_line(u8g2_t *u8g2);
 
 //void lcd_fb_public_copy_pages(const uint8_t *src, uint16_t src_stride)
 //{
@@ -2233,7 +2247,7 @@ static const lcd_page_node_t g_lcd_pages[LCD_PAGE_MAX] = {
         0U,
         0U,
         RT_FALSE,
-        lcd_render_submenu_ui,
+        lcd_render_vin_set_ui,
         RT_NULL,
         0U,
         LCD_PAGE_MAX
@@ -2404,6 +2418,10 @@ static void lcd_page_on_enter_prepare(lcd_page_id_t page_id)
     if (page_id == LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_PLATE_SET) {
         lcd_prepare_plate_set_page();
     }
+    if (page_id == LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_VIN) {
+        lcd_prepare_vin_set_page();
+    }
+
 
 }
 
@@ -3388,6 +3406,19 @@ static void svc_lcd_thread_entry(void *arg)
             continue;
         }
 
+        if (lcd_handle_vin_set_keys() == RT_TRUE) {
+            lcd_page_handle_auto_return();
+            lcd_page_handle_dynamic_refresh();
+
+            if (g_lcd_need_redraw == RT_TRUE) {
+                lcd_render_current_page();
+                g_lcd_need_redraw = RT_FALSE;
+            }
+
+            rt_thread_mdelay(10);
+            continue;
+        }
+
         if (lcd_handle_plate_set_keys() == RT_TRUE) {
             lcd_page_handle_auto_return();
             lcd_page_handle_dynamic_refresh();
@@ -3820,6 +3851,216 @@ static void lcd_plate_save_and_ok(void)
     }
 }
 
+static void lcd_vin_draw_top_line(u8g2_t *u8g2)
+{
+    uint8_t i;
+    uint8_t x;
+    char ch;
+
+    u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+
+    for (i = 0U; i < LCD_VIN_LEN; i++) {
+        x = (uint8_t)(4U + i * 7U);
+
+        if ((g_lcd_vin_valid == 0U) && (g_lcd_vin_dirty == 0U)) {
+            ch = '_';
+        } else {
+            ch = g_lcd_plate_tail_chars[g_lcd_vin_chars[i]];
+        }
+
+        lcd_plate_draw_ascii_cell(u8g2,
+                                  x,
+                                  12U,
+                                  ch,
+                                  (g_lcd_vin_focus == i) ? RT_TRUE : RT_FALSE);
+    }
+}
+
+static void lcd_prepare_vin_set_page(void)
+{
+    svc_storage_vin_t vin;
+    uint8_t i;
+    const char *p;
+
+    g_lcd_vin_focus = 0U;
+    g_lcd_vin_dirty = 0U;
+
+    if ((svc_storage_load_vin(&vin) == RT_TRUE) && (vin.valid == 1U)) {
+        g_lcd_vin_valid = 1U;
+
+        for (i = 0U; i < LCD_VIN_LEN; i++) {
+            p = strchr(g_lcd_plate_tail_chars, vin.vin[i]);
+            if (p != RT_NULL) {
+                g_lcd_vin_chars[i] = (uint8_t)(p - g_lcd_plate_tail_chars);
+            } else {
+                g_lcd_vin_chars[i] = 0U;
+            }
+        }
+    } else {
+        g_lcd_vin_valid = 0U;
+
+        for (i = 0U; i < LCD_VIN_LEN; i++) {
+            g_lcd_vin_chars[i] = 0U;
+        }
+    }
+}
+
+static void lcd_vin_save_and_ok(void)
+{
+    svc_storage_vin_t vin;
+    uint8_t i;
+
+    vin.valid = 1U;
+
+    for (i = 0U; i < LCD_VIN_LEN; i++) {
+        vin.vin[i] = g_lcd_plate_tail_chars[g_lcd_vin_chars[i]];
+    }
+    vin.vin[LCD_VIN_LEN] = '\0';
+
+    if (svc_storage_save_vin(&vin) == RT_TRUE) {
+        g_lcd_vin_valid = 1U;
+        g_lcd_vin_dirty = 0U;
+        lcd_page_enter_common_ok(LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_VIN);
+    }
+}
+
+static void lcd_render_vin_set_ui(void)
+{
+    u8g2_t *u8g2;
+    uint8_t i;
+    uint8_t selected;
+    uint8_t x;
+    static const uint16_t g_confirm_text[] = {0x786E, 0x8BA4};
+    static const uint16_t g_exit_text[] = {0x9000, 0x51FA};
+
+    u8g2 = u8g2_port_get();
+    if (u8g2 == RT_NULL) {
+        return;
+    }
+
+    u8g2_port_clear_buffer();
+    u8g2_SetFontMode(u8g2, 1);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    lcd_vin_draw_top_line(u8g2);
+
+    u8g2_DrawFrame(u8g2, 2, 18, 128, 28);
+
+    if (g_lcd_vin_focus < LCD_VIN_LEN) {
+        selected = g_lcd_vin_chars[g_lcd_vin_focus];
+
+        u8g2_SetFont(u8g2, LCD_FONT_ASCII_SMALL);
+
+        for (i = 0U; i < 18U; i++) {
+            x = (uint8_t)(4U + i * 7U);
+            lcd_plate_draw_ascii_option(u8g2,
+                                        x,
+                                        30U,
+                                        g_lcd_plate_tail_chars[i],
+                                        (i == selected) ? RT_TRUE : RT_FALSE);
+        }
+
+        for (i = 18U; i < LCD_VIN_CHAR_COUNT; i++) {
+            x = (uint8_t)(4U + (i - 18U) * 7U);
+            lcd_plate_draw_ascii_option(u8g2,
+                                        x,
+                                        42U,
+                                        g_lcd_plate_tail_chars[i],
+                                        (i == selected) ? RT_TRUE : RT_FALSE);
+        }
+    }
+
+    u8g2_SetFont(u8g2, LCD_FONT_CN_12);
+
+    if (g_lcd_vin_focus == LCD_VIN_FOCUS_CONFIRM) {
+        u8g2_DrawBox(u8g2, 0, 49, 34, 14);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 2, 60, g_confirm_text, 2);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    if (g_lcd_vin_focus == LCD_VIN_FOCUS_EXIT) {
+        u8g2_DrawBox(u8g2, 96, 49, 34, 14);
+        u8g2_SetDrawColor(u8g2, 0);
+    }
+    lcd_u8g2_draw_unicode_seq(u8g2, 104, 60, g_exit_text, 2);
+    u8g2_SetDrawColor(u8g2, 1);
+
+    u8g2_port_flush_buffer();
+}
+
+static rt_bool_t lcd_handle_vin_set_keys(void)
+{
+    if (g_lcd_current_page_id != LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO_VIN) {
+        return RT_FALSE;
+    }
+
+    if (svc_adc_consume_s1_event() == RT_TRUE) {
+        if (g_lcd_vin_focus < LCD_VIN_FOCUS_MAX) {
+            g_lcd_vin_focus++;
+        } else {
+            g_lcd_vin_focus = 0U;
+        }
+
+        g_lcd_need_redraw = RT_TRUE;
+        return RT_TRUE;
+    }
+
+    if (svc_adc_consume_s2_event() == RT_TRUE) {
+        if (g_lcd_vin_focus < LCD_VIN_LEN) {
+            if (g_lcd_vin_chars[g_lcd_vin_focus] > 0U) {
+                g_lcd_vin_chars[g_lcd_vin_focus]--;
+            } else {
+                g_lcd_vin_chars[g_lcd_vin_focus] = (LCD_VIN_CHAR_COUNT - 1U);
+            }
+
+            g_lcd_vin_dirty = 1U;
+        } else if (g_lcd_vin_focus == LCD_VIN_FOCUS_CONFIRM) {
+            g_lcd_vin_focus = LCD_VIN_FOCUS_EXIT;
+        } else {
+            g_lcd_vin_focus = LCD_VIN_FOCUS_CONFIRM;
+        }
+
+        g_lcd_need_redraw = RT_TRUE;
+        return RT_TRUE;
+    }
+
+    if (svc_adc_consume_s3_event() == RT_TRUE) {
+        if (g_lcd_vin_focus < LCD_VIN_LEN) {
+            if (g_lcd_vin_chars[g_lcd_vin_focus] < (LCD_VIN_CHAR_COUNT - 1U)) {
+                g_lcd_vin_chars[g_lcd_vin_focus]++;
+            } else {
+                g_lcd_vin_chars[g_lcd_vin_focus] = 0U;
+            }
+
+            g_lcd_vin_dirty = 1U;
+        } else if (g_lcd_vin_focus == LCD_VIN_FOCUS_CONFIRM) {
+            g_lcd_vin_focus = LCD_VIN_FOCUS_EXIT;
+        } else {
+            g_lcd_vin_focus = LCD_VIN_FOCUS_CONFIRM;
+        }
+
+        g_lcd_need_redraw = RT_TRUE;
+        return RT_TRUE;
+    }
+
+    if (svc_adc_consume_s4_event() == RT_TRUE) {
+        if (g_lcd_vin_focus == LCD_VIN_FOCUS_CONFIRM) {
+            lcd_vin_save_and_ok();
+            return RT_TRUE;
+        }
+
+        if (g_lcd_vin_focus == LCD_VIN_FOCUS_EXIT) {
+            lcd_page_enter(LCD_PAGE_SYSTEM_SETTING_VEHICLE_INFO);
+            return RT_TRUE;
+        }
+
+        g_lcd_need_redraw = RT_TRUE;
+        return RT_TRUE;
+    }
+
+    return RT_FALSE;
+}
 
 static void lcd_prepare_plate_set_page(void)
 {

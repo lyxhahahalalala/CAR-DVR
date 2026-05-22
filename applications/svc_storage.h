@@ -105,6 +105,16 @@ typedef struct
     char digits[6];         /* 5位数字/字母 + '\0' */
 } svc_storage_plate_number_t;
 
+
+#define SVC_STORAGE_VIN_LEN 17U
+
+typedef struct
+{
+    uint8_t valid;                         /* 0=未设置, 1=已设置 */
+    char vin[SVC_STORAGE_VIN_LEN + 1U];    /* 17位VIN + '\0' */
+} svc_storage_vin_t;
+
+
 /*
  * 完整配置结构体
  * 在 EEPROM 中以 svc_storage_config_record_t 格式存储
@@ -155,5 +165,8 @@ rt_bool_t svc_storage_save_plate_color(const svc_storage_plate_color_t *plate_co
 
 rt_bool_t svc_storage_load_plate_number(svc_storage_plate_number_t *plate_number);
 rt_bool_t svc_storage_save_plate_number(const svc_storage_plate_number_t *plate_number);
+rt_bool_t svc_storage_load_vin(svc_storage_vin_t *vin);
+rt_bool_t svc_storage_save_vin(const svc_storage_vin_t *vin);
+
 
 #endif /* APPLICATIONS_SVC_STORAGE_H_ */
