@@ -114,6 +114,22 @@ typedef struct
     char vin[SVC_STORAGE_VIN_LEN + 1U];    /* 17位VIN + '\0' */
 } svc_storage_vin_t;
 
+#define SVC_STORAGE_PROVINCE_ID_LEN 2U
+
+typedef struct
+{
+    uint8_t valid;
+    char id[SVC_STORAGE_PROVINCE_ID_LEN + 1U];
+} svc_storage_province_id_t;
+
+#define SVC_STORAGE_CITY_ID_LEN 4U
+
+typedef struct
+{
+    uint8_t valid;
+    char id[SVC_STORAGE_CITY_ID_LEN + 1U];
+} svc_storage_city_id_t;
+
 
 /*
  * 完整配置结构体
@@ -167,6 +183,8 @@ rt_bool_t svc_storage_load_plate_number(svc_storage_plate_number_t *plate_number
 rt_bool_t svc_storage_save_plate_number(const svc_storage_plate_number_t *plate_number);
 rt_bool_t svc_storage_load_vin(svc_storage_vin_t *vin);
 rt_bool_t svc_storage_save_vin(const svc_storage_vin_t *vin);
-
-
+rt_bool_t svc_storage_load_province_id(svc_storage_province_id_t *province_id);
+rt_bool_t svc_storage_save_province_id(const svc_storage_province_id_t *province_id);
+rt_bool_t svc_storage_load_city_id(svc_storage_city_id_t *city_id);
+rt_bool_t svc_storage_save_city_id(const svc_storage_city_id_t *city_id);
 #endif /* APPLICATIONS_SVC_STORAGE_H_ */

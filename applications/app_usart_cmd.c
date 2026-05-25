@@ -58,6 +58,77 @@ static struct rt_semaphore g_uart_cmd_rx_sem;
 static app_uart_cmd_text_msg_t g_uart_cmd_text_msg;
 static uint16_t g_uart_cmd_text_assem_len = 0U;
 
+#define APP_MCU_STATUS_CFG_VALID_PHONE        (1U << 0)
+#define APP_MCU_STATUS_CFG_VALID_PLATE        (1U << 1)
+#define APP_MCU_STATUS_CFG_VALID_VIN          (1U << 2)
+#define APP_MCU_STATUS_CFG_VALID_PROVINCE_ID  (1U << 3)
+#define APP_MCU_STATUS_CFG_VALID_CITY_ID      (1U << 4)
+/*
+ * valid_flags:
+ *   bit0 = 本机号码已配置，非 "00000000000"
+ *   bit1 = 车牌号已配置
+ *   bit2 = VIN 已配置
+ *   bit3 = 省域 ID 已配置
+ *   bit4 = 市域 ID 已配置
+ *
+ * plate_class 和 plate_color 始终发送当前值；
+ * 未配置时由 EEPROM 默认配置决定。
+ */
+typedef struct APP_PACKED_STRUCT
+{
+    uint8_t valid_flags;
+
+    char local_phone[11];
+
+    uint8_t plate_class;
+    uint8_t plate_color;
+    uint8_t plate_province_utf8[3];
+    char plate_letter;
+    char plate_tail[5];
+
+    char vin[17];
+    char province_id[2];
+    char city_id[4];
+} app_mcu_config_status_t;
+
+
+
+static const uint8_t g_mcu_plate_province_utf8[SVC_STORAGE_PLATE_PROVINCE_COUNT][3] = {
+    {0xE4U, 0xBAU, 0xACU}, /* 京 */
+    {0xE6U, 0xB4U, 0xA5U}, /* 津 */
+    {0xE6U, 0xB2U, 0xAAU}, /* 沪 */
+    {0xE6U, 0xB8U, 0x9DU}, /* 渝 */
+    {0xE5U, 0x86U, 0x80U}, /* 冀 */
+    {0xE8U, 0xB1U, 0xABU}, /* 豫 */
+    {0xE4U, 0xBAU, 0x91U}, /* 云 */
+    {0xE8U, 0xBEU, 0xBDU}, /* 辽 */
+    {0xE9U, 0xBBU, 0x91U}, /* 黑 */
+    {0xE6U, 0xB9U, 0x98U}, /* 湘 */
+    {0xE7U, 0x9AU, 0x96U}, /* 皖 */
+    {0xE9U, 0xB2U, 0x81U}, /* 鲁 */
+    {0xE6U, 0x96U, 0xB0U}, /* 新 */
+    {0xE8U, 0x8BU, 0x8FU}, /* 苏 */
+    {0xE6U, 0xB5U, 0x99U}, /* 浙 */
+    {0xE8U, 0xB5U, 0xA3U}, /* 赣 */
+    {0xE9U, 0x84U, 0x82U}, /* 鄂 */
+    {0xE6U, 0xA1U, 0x82U}, /* 桂 */
+    {0xE7U, 0x94U, 0x98U}, /* 甘 */
+    {0xE6U, 0x99U, 0x8BU}, /* 晋 */
+    {0xE8U, 0x92U, 0x99U}, /* 蒙 */
+    {0xE9U, 0x99U, 0x95U}, /* 陕 */
+    {0xE5U, 0x90U, 0x89U}, /* 吉 */
+    {0xE9U, 0x97U, 0xBDU}, /* 闽 */
+    {0xE8U, 0xB4U, 0xB5U}, /* 贵 */
+    {0xE7U, 0xB2U, 0xA4U}, /* 粤 */
+    {0xE9U, 0x9DU, 0x92U}, /* 青 */
+    {0xE8U, 0x97U, 0x8FU}, /* 藏 */
+    {0xE5U, 0xB7U, 0x9DU}, /* 川 */
+    {0xE5U, 0xAEU, 0x81U}, /* 宁 */
+    {0xE7U, 0x90U, 0xBCU}  /* 琼 */
+};
+
+static app_mcu_config_status_t g_mcu_config_cache;
+
 typedef struct APP_PACKED_STRUCT
 {
     uint8_t major;
@@ -66,22 +137,23 @@ typedef struct APP_PACKED_STRUCT
 
     uint8_t wk_acc : 1;
     uint8_t wk_on : 1;
-    uint8_t sw_kl1 : 1;//小灯
-    uint8_t sw_kl2 : 1;//制动
-    uint8_t sw_kl3 : 1;//左转
-    uint8_t sw_kl4 : 1;//右转
-    uint8_t sw_kl5 : 1;//远光
-    uint8_t sw_kl6 : 1;//近光
+    uint8_t sw_kl1 : 1;      /* 小灯 */
+    uint8_t sw_kl2 : 1;      /* 制动 */
+    uint8_t sw_kl3 : 1;      /* 左转 */
+    uint8_t sw_kl4 : 1;      /* 右转 */
+    uint8_t sw_kl5 : 1;      /* 远光 */
+    uint8_t sw_kl6 : 1;      /* 近光 */
 
-    uint8_t sw_kl7 : 1;//后雾灯
-    uint8_t sw_kl8 : 1;//倒车
-    uint8_t sw_kl9 : 1;//驾驶员安全带
-    uint8_t sw_kl10 : 1;//车门
-    uint8_t key : 1;//按键声音是否触发
-    //uint8_t sound_level :2;//音量大小
+    uint8_t sw_kl7 : 1;      /* 后雾灯 */
+    uint8_t sw_kl8 : 1;      /* 倒车 */
+    uint8_t sw_kl9 : 1;      /* 驾驶员安全带 */
+    uint8_t sw_kl10 : 1;     /* 车门 */
+    uint8_t key : 1;         /* 按键声音是否触发 */
     uint8_t reserved : 3;
 
     uint32_t admin_region_code;
+
+    app_mcu_config_status_t config;
 
 } app_mcu_status_t;
 
@@ -480,11 +552,117 @@ static void app_uart_cmd_parse_version(app_mcu_status_t *status)
     status->patch = values[2];
 }
 
+void app_usart_cmd_refresh_status_config(void)
+{
+    svc_storage_config_t config;
+    svc_storage_vin_t vin;
+    svc_storage_province_id_t province_id;
+    svc_storage_city_id_t city_id;
+    app_mcu_config_status_t cache;
+    rt_base_t level;
+
+    rt_memset(&cache, 0, sizeof(cache));
+
+    /*
+     * load_config() 即使 EEPROM 无有效配置，也会返回默认配置：
+     * phone = "00000000000", plate_class = 1, plate_color = 1。
+     */
+    (void)svc_storage_load_config(&config);
+    (void)svc_storage_load_vin(&vin);
+    (void)svc_storage_load_province_id(&province_id);
+    (void)svc_storage_load_city_id(&city_id);
+
+    rt_memcpy(cache.local_phone,
+              config.local_phone,
+              sizeof(cache.local_phone));
+
+    cache.plate_class = config.plate_class;
+    cache.plate_color = config.plate_color;
+
+    if (config.plate_number.province_index < SVC_STORAGE_PLATE_PROVINCE_COUNT) {
+        rt_memcpy(cache.plate_province_utf8,
+                  g_mcu_plate_province_utf8[config.plate_number.province_index],
+                  sizeof(cache.plate_province_utf8));
+    }
+
+    cache.plate_letter = config.plate_number.letter;
+
+
+    rt_memcpy(cache.plate_tail,
+              config.plate_number.digits,
+              sizeof(cache.plate_tail));
+
+    rt_memcpy(cache.vin,
+              vin.vin,
+              sizeof(cache.vin));
+
+    rt_memcpy(cache.province_id,
+              province_id.id,
+              sizeof(cache.province_id));
+
+    rt_memcpy(cache.city_id,
+              city_id.id,
+              sizeof(cache.city_id));
+
+    if (memcmp(config.local_phone, "00000000000", 11U) != 0) {
+        cache.valid_flags |= APP_MCU_STATUS_CFG_VALID_PHONE;
+    }
+
+    if (config.plate_number.valid == 1U) {
+        cache.valid_flags |= APP_MCU_STATUS_CFG_VALID_PLATE;
+    }
+
+    if (vin.valid == 1U) {
+        cache.valid_flags |= APP_MCU_STATUS_CFG_VALID_VIN;
+    }
+
+    if (province_id.valid == 1U) {
+        cache.valid_flags |= APP_MCU_STATUS_CFG_VALID_PROVINCE_ID;
+    }
+
+    if (city_id.valid == 1U) {
+        cache.valid_flags |= APP_MCU_STATUS_CFG_VALID_CITY_ID;
+    }
+
+    /*
+     * LCD 保存线程可能与周期发送线程同时运行。
+     * 只在复制 44 字节缓存时关中断，避免发送到一半新旧配置混合。
+     */
+    level = rt_hw_interrupt_disable();
+    rt_memcpy(&g_mcu_config_cache, &cache, sizeof(g_mcu_config_cache));
+    rt_hw_interrupt_enable(level);
+
+    rt_kprintf("[uart_cmd][mcu cfg] valid=0x%02X "
+               "phone=%.*s class=%u color=%u "
+               "plate=%.*s%c.%.*s vin=%.*s province=%.*s city=%.*s\r\n",
+               cache.valid_flags,
+               11, cache.local_phone,
+               cache.plate_class,
+               cache.plate_color,
+               3, (const char *)cache.plate_province_utf8,
+               cache.plate_letter,
+               5, cache.plate_tail,
+               17, cache.vin,
+               2, cache.province_id,
+               4, cache.city_id);
+    rt_kprintf("[uart_cmd][plate utf8] %02X %02X %02X %c %.*s\r\n",
+               cache.plate_province_utf8[0],
+               cache.plate_province_utf8[1],
+               cache.plate_province_utf8[2],
+               cache.plate_letter,
+               5, cache.plate_tail);
+
+
+}
+
+
 static uint16_t app_uart_cmd_build_mcu_version(uint8_t *buf, uint16_t buf_size)
 {
     app_mcu_status_frame_t frame;
     const app_vehicle_io_state_t *io_state;
+    rt_base_t level;
     uint16_t crc;
+
 
     if ((buf == RT_NULL) || (buf_size < sizeof(frame))) {
         return 0U;
@@ -521,8 +699,18 @@ static uint16_t app_uart_cmd_build_mcu_version(uint8_t *buf, uint16_t buf_size)
     frame.status.reserved = 0U;
     frame.status.admin_region_code = (uint32_t)APP_ADMIN_REGION_CODE;
 
+    /*
+     * 周期发送只读取 RAM 缓存，不访问 EEPROM。
+     */
+    level = rt_hw_interrupt_disable();
+    rt_memcpy(&frame.status.config,
+              &g_mcu_config_cache,
+              sizeof(frame.status.config));
+    rt_hw_interrupt_enable(level);
+
     crc = app_uart_cmd_crc16((const uint8_t *)&frame.status,
                              sizeof(frame.status));
+
     frame.crc_l = (uint8_t)(crc & 0xFFU);
     frame.crc_h = (uint8_t)(crc >> 8);
     frame.tail = APP_UART_CMD_FRAME_TAIL;
@@ -1125,7 +1313,11 @@ int app_usart_cmd_init(void)
     rt_memset(&g_uart_cmd_text_msg, 0, sizeof(g_uart_cmd_text_msg));
     g_uart_cmd_text_assem_len = 0U;
 
+    rt_memset(&g_mcu_config_cache, 0, sizeof(g_mcu_config_cache));
+    app_usart_cmd_refresh_status_config();
+
     result = rt_sem_init(&g_uart_cmd_rx_sem, "uart_cmd", 0, RT_IPC_FLAG_FIFO);
+
     if (result != RT_EOK) {
         return result;
     }

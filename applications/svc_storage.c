@@ -65,6 +65,13 @@
 #define SVC_STORAGE_VIN_MAGIC            0x56494E31UL /* "VIN1" */
 #define SVC_STORAGE_VIN_VERSION          1U
 
+#define SVC_STORAGE_PROVINCE_ID_ADDR     0x0140U
+#define SVC_STORAGE_PROVINCE_ID_MAGIC    0x50524944UL /* "省域ID" */
+#define SVC_STORAGE_PROVINCE_ID_VERSION  1U
+
+#define SVC_STORAGE_CITY_ID_ADDR         0x0180U
+#define SVC_STORAGE_CITY_ID_MAGIC        0x43495459UL /* 市域ID */
+#define SVC_STORAGE_CITY_ID_VERSION      1U
 /*
  * ============================================================
  *  EEPROM 内部记录结构体 (带完整性保护头)
@@ -143,7 +150,23 @@ typedef struct
     uint32_t checksum;
 } svc_storage_vin_record_t;
 
+typedef struct
+{
+    uint32_t magic;
+    uint16_t version;
+    uint16_t length;
+    svc_storage_province_id_t province_id;
+    uint32_t checksum;
+} svc_storage_province_id_record_t;
 
+typedef struct
+{
+    uint32_t magic;
+    uint16_t version;
+    uint16_t length;
+    svc_storage_city_id_t city_id;
+    uint32_t checksum;
+} svc_storage_city_id_record_t;
 /* I2C 总线设备句柄, 通过 rt_device_find() 获取 */
 static struct rt_i2c_bus_device *g_eeprom_i2c_bus = RT_NULL;
 
@@ -573,7 +596,117 @@ static rt_bool_t svc_storage_vin_record_is_valid(const svc_storage_vin_record_t 
     return (checksum == record->checksum) ? RT_TRUE : RT_FALSE;
 }
 
+static rt_bool_t svc_storage_province_id_valid(const svc_storage_province_id_t *province_id)
+{
+    uint8_t i;
 
+    if (province_id == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if (province_id->valid > 1U) {
+        return RT_FALSE;
+    }
+
+    if (province_id->id[SVC_STORAGE_PROVINCE_ID_LEN] != '\0') {
+        return RT_FALSE;
+    }
+
+    if (province_id->valid == 0U) {
+        return RT_TRUE;
+    }
+
+    for (i = 0U; i < SVC_STORAGE_PROVINCE_ID_LEN; i++) {
+        if ((province_id->id[i] < '0') || (province_id->id[i] > '9')) {
+            return RT_FALSE;
+        }
+    }
+
+    return RT_TRUE;
+}
+
+static rt_bool_t svc_storage_province_id_record_is_valid(
+    const svc_storage_province_id_record_t *record)
+{
+    uint32_t checksum;
+
+    if (record == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if ((record->magic != SVC_STORAGE_PROVINCE_ID_MAGIC) ||
+        (record->version != SVC_STORAGE_PROVINCE_ID_VERSION) ||
+        (record->length != sizeof(svc_storage_province_id_record_t))) {
+        return RT_FALSE;
+    }
+
+    if (svc_storage_province_id_valid(&record->province_id) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    checksum = svc_storage_checksum(
+        (const uint8_t *)record,
+        (uint16_t)(sizeof(svc_storage_province_id_record_t) -
+                   sizeof(record->checksum)));
+
+    return (checksum == record->checksum) ? RT_TRUE : RT_FALSE;
+}
+
+static rt_bool_t svc_storage_city_id_valid(const svc_storage_city_id_t *city_id)
+{
+    uint8_t i;
+
+    if (city_id == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if (city_id->valid > 1U) {
+        return RT_FALSE;
+    }
+
+    if (city_id->id[SVC_STORAGE_CITY_ID_LEN] != '\0') {
+        return RT_FALSE;
+    }
+
+    if (city_id->valid == 0U) {
+        return RT_TRUE;
+    }
+
+    for (i = 0U; i < SVC_STORAGE_CITY_ID_LEN; i++) {
+        if ((city_id->id[i] < '0') || (city_id->id[i] > '9')) {
+            return RT_FALSE;
+        }
+    }
+
+    return RT_TRUE;
+}
+
+static rt_bool_t svc_storage_city_id_record_is_valid(
+    const svc_storage_city_id_record_t *record)
+{
+    uint32_t checksum;
+
+    if (record == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if ((record->magic != SVC_STORAGE_CITY_ID_MAGIC) ||
+        (record->version != SVC_STORAGE_CITY_ID_VERSION) ||
+        (record->length != sizeof(svc_storage_city_id_record_t))) {
+        return RT_FALSE;
+    }
+
+    if (svc_storage_city_id_valid(&record->city_id) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    checksum = svc_storage_checksum(
+        (const uint8_t *)record,
+        (uint16_t)(sizeof(svc_storage_city_id_record_t) -
+                   sizeof(record->checksum)));
+
+    return (checksum == record->checksum) ? RT_TRUE : RT_FALSE;
+}
 
 /**
  * @brief 校验配置记录是否有效
@@ -1122,5 +1255,125 @@ rt_bool_t svc_storage_save_vin(const svc_storage_vin_t *vin)
     }
 
     return svc_storage_vin_record_is_valid(&verify);
+}
+
+rt_bool_t svc_storage_load_province_id(svc_storage_province_id_t *province_id)
+{
+    svc_storage_province_id_record_t record;
+
+    if (province_id == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if ((g_eeprom_i2c_bus == RT_NULL) ||
+        (svc_eeprom_read(SVC_STORAGE_PROVINCE_ID_ADDR,
+                         (uint8_t *)&record,
+                         sizeof(record)) != RT_TRUE) ||
+        (svc_storage_province_id_record_is_valid(&record) != RT_TRUE)) {
+        province_id->valid = 0U;
+        rt_memset(province_id->id, 0, sizeof(province_id->id));
+        return RT_FALSE;
+    }
+
+    *province_id = record.province_id;
+    return RT_TRUE;
+}
+
+rt_bool_t svc_storage_save_province_id(const svc_storage_province_id_t *province_id)
+{
+    svc_storage_province_id_record_t record;
+    svc_storage_province_id_record_t verify;
+
+    if (svc_storage_province_id_valid(province_id) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    if (g_eeprom_i2c_bus == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    rt_memset(&record, 0, sizeof(record));
+    record.magic = SVC_STORAGE_PROVINCE_ID_MAGIC;
+    record.version = SVC_STORAGE_PROVINCE_ID_VERSION;
+    record.length = sizeof(record);
+    record.province_id = *province_id;
+
+    record.checksum = svc_storage_checksum(
+        (const uint8_t *)&record,
+        (uint16_t)(sizeof(record) - sizeof(record.checksum)));
+
+    if (svc_eeprom_write(SVC_STORAGE_PROVINCE_ID_ADDR,
+                         (const uint8_t *)&record,
+                         sizeof(record)) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    if (svc_eeprom_read(SVC_STORAGE_PROVINCE_ID_ADDR,
+                        (uint8_t *)&verify,
+                        sizeof(verify)) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    return svc_storage_province_id_record_is_valid(&verify);
+}
+
+rt_bool_t svc_storage_load_city_id(svc_storage_city_id_t *city_id)
+{
+    svc_storage_city_id_record_t record;
+
+    if (city_id == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    if ((g_eeprom_i2c_bus == RT_NULL) ||
+        (svc_eeprom_read(SVC_STORAGE_CITY_ID_ADDR,
+                         (uint8_t *)&record,
+                         sizeof(record)) != RT_TRUE) ||
+        (svc_storage_city_id_record_is_valid(&record) != RT_TRUE)) {
+        city_id->valid = 0U;
+        rt_memset(city_id->id, 0, sizeof(city_id->id));
+        return RT_FALSE;
+    }
+
+    *city_id = record.city_id;
+    return RT_TRUE;
+}
+
+rt_bool_t svc_storage_save_city_id(const svc_storage_city_id_t *city_id)
+{
+    svc_storage_city_id_record_t record;
+    svc_storage_city_id_record_t verify;
+
+    if (svc_storage_city_id_valid(city_id) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    if (g_eeprom_i2c_bus == RT_NULL) {
+        return RT_FALSE;
+    }
+
+    rt_memset(&record, 0, sizeof(record));
+    record.magic = SVC_STORAGE_CITY_ID_MAGIC;
+    record.version = SVC_STORAGE_CITY_ID_VERSION;
+    record.length = sizeof(record);
+    record.city_id = *city_id;
+
+    record.checksum = svc_storage_checksum(
+        (const uint8_t *)&record,
+        (uint16_t)(sizeof(record) - sizeof(record.checksum)));
+
+    if (svc_eeprom_write(SVC_STORAGE_CITY_ID_ADDR,
+                         (const uint8_t *)&record,
+                         sizeof(record)) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    if (svc_eeprom_read(SVC_STORAGE_CITY_ID_ADDR,
+                        (uint8_t *)&verify,
+                        sizeof(verify)) != RT_TRUE) {
+        return RT_FALSE;
+    }
+
+    return svc_storage_city_id_record_is_valid(&verify);
 }
 
